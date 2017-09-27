@@ -195,27 +195,6 @@ def split_cmp(cmp, stream_dims):
     return split_data        
 
 
-
-
-# def weight(speech, weight_vec):
-
-#     m,n = np.shape(speech)
-        
-#     weight_mat = np.tile(weight_vec,(m,1))
-    
-#     speech = speech * weight_mat
-#     return speech
-
-# def deweight(speech, weight_vec):
-
-#     m,n = np.shape(speech)
-        
-#     weight_mat = np.tile(weight_vec,(m,1))
-    
-#     speech = speech / weight_mat
-#     return speech
-
-
 def weight(speech, weight_vec):
     m,n = np.shape(speech)        
     weight_vec = np.array(weight_vec).reshape((1,-1)) 
