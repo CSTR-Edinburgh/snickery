@@ -45,7 +45,7 @@ cd $MY_OPENFST_DIR
 wget http://www.openfst.org/twiki/pub/FST/FstDownload/openfst-1.5.4.tar.gz
 tar xvf openfst-1.5.4.tar.gz
 cd openfst-1.5.4/
-./configure --prefix=${$MY_OPENFST_DIR} --enable-far --enable-mpdt --enable-pdt
+./configure --prefix=${MY_OPENFST_DIR} --enable-far --enable-mpdt --enable-pdt
 make
 make install  
 
