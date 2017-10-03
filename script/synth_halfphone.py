@@ -93,8 +93,8 @@ class Synthesiser():
         self.train_filenames = f["filenames"][:]                 
         self.mean_vec_target = f["mean_target"][:] 
         self.std_vec_target = f["std_target"][:] 
-        self.mean_vec_target = f["mean_join"][:] 
-        self.std_vec_target = f["std_join"][:] 
+        self.mean_vec_join = f["mean_join"][:] 
+        self.std_vec_join = f["std_join"][:] 
 
         join_contexts = f["join_contexts"][:,:]
         f.close()
@@ -751,5 +751,5 @@ if __name__ == '__main__':
 
     synth = Synthesiser(opts.config_fname)
     #synth.test_concatenation_code()
-
+    
     synth.synth_from_config()
