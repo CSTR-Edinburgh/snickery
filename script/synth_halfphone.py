@@ -509,6 +509,17 @@ class Synthesiser():
 
         return wave 
 
+    def get_natural_distance(self, first, second, order=2):
+        '''
+        first and second: indices of left and right units to be joined
+        order: number of frames of overlap
+        '''
+        sq_diffs = (self.unit_end_data[first,:] - self.unit_start_data[second,:])**2
+        ## already weighted, skip next line:
+        #sq_diffs *= self.join_weight_vector
+        distance = (1.0 / order) * math.sqrt(np.sum(sq_diffs))   
+        return distance
+
     def make_on_the_fly_join_lattice(self, ind, outfile, join_cost_weight=1.0):
 
         ## These are irrelevant when using halfphones -- suppress them:
@@ -520,13 +531,10 @@ class Synthesiser():
         join_cost_type = 'natural2'
         assert join_cost_type in ['natural2']
 
-        unit_end_data = self.unit_end_data
-        unit_start_data = self.unit_start_data
-
         start = 0
         frames, cands = np.shape(ind)
     
-        data_frames, dim = unit_end_data.shape
+        data_frames, dim = self.unit_end_data.shape
         
         ## cache costs for joins which could be used in an utterance.
         ## This can save  computing things twice, 52 seconds -> 33 (335 frames, 50 candidates) 
@@ -555,10 +563,8 @@ class Synthesiser():
                         continue
                     
                     if  join_cost_type == 'natural2':
-                        sq_diffs = (unit_end_data[first,:] - unit_start_data[second,:])**2
-                        ## already weighted, skip next line:
-                        #sq_diffs *= self.join_weight_vector
-                        weight = 0.5 * math.sqrt(np.sum(sq_diffs))                                                                                              
+                        weight = self.get_natural_distance(first, second, order=2)
+
                     else:
                         sys.exit('Unknown join cost type: %s'%(join_cost_type))
 
