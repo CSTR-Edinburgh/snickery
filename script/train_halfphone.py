@@ -471,11 +471,14 @@ def read_pm(fname):
     return lines
   
           
-def get_data_dump_name(config, joindata=False):
+def get_data_dump_name(config, joindata=False, joinsql=False):
     safe_makedir(os.path.join(config['workdir'], 'data_dumps'))
     condition = make_train_condition_name(config)
+    assert not (joindata and joinsql)
     if joindata:
         last_part = '.joindata.hdf5'
+    elif joinsql:
+        last_part = '.joindata.sql'
     else:
         last_part = '.hdf5'
     database_fname = os.path.join(config['workdir'], "data_dumps", condition + last_part)

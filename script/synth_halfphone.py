@@ -25,6 +25,12 @@ from label_manip import break_quinphone, extract_monophone
 from train_halfphone import get_data_dump_name, compose_speech, standardise, \
         read_label, get_halfphone_stats, reinsert_terminal_silence, make_train_condition_name
 
+DODEBUG=False ## print debug information?
+
+
+from train_halfphone import debug
+
+
 # import pylab
 
 WRAPFST=True # True: used python bindings (pywrapfst) to OpenFST; False: use command line interface
@@ -60,7 +66,7 @@ def suppress_weird_festival_pauses(label, replace_list=['B_150'], replacement='p
 
     
 
-class Synthesiser():
+class Synthesiser(object):
 
     def __init__(self, config_file):
 
@@ -98,6 +104,8 @@ class Synthesiser():
 
         join_contexts = f["join_contexts"][:,:]
         f.close()
+
+        self.number_of_units, _ = self.train_unit_features.shape
 
         if self.config.get('weight_target_data', True):
             self.train_unit_features = weight(self.train_unit_features, self.target_weight_vector)   
@@ -451,6 +459,7 @@ class Synthesiser():
         return frag
 
     def retrieve_speech(self, index):
+
         if self.config['hold_waves_in_memory']:
             wave = self.waveforms[self.train_filenames[index]]  
         else:     
@@ -476,10 +485,15 @@ class Synthesiser():
             frag[:taper] *= open_taper
             frag[-taper:] *= close_taper
 
-
+        if DODEBUG:
+            orig = (self.train_cutpoints[index][1] - self.train_cutpoints[index][0])
+            print('orig length: %s' %  orig)
+            print('length with taper: %s '%(frag.shape))
+            print (frag.shape - orig)
         return frag
 
     def concatenate(self, path, fname):
+
         frags = []
         for unit_index in path:
             frags.append(self.retrieve_speech(unit_index))
@@ -504,8 +518,9 @@ class Synthesiser():
             # padded[start:start+len(frag)] += frag
             # pylab.plot(padded)
 
+
             wave[start:start+len(frag)] += frag
-            start += (len(frag) - taper) + 1
+            start += (len(frag) - taper) #+ 1
 
         return wave 
 
