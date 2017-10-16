@@ -76,6 +76,80 @@ pip install openfst==1.5.4
 ```
 
 
+### Tools for feature extraction
+
+Get GNU parallel to speed up feature extraction:
+
+```
+cd script_data/
+wget http://ftp.gnu.org/gnu/parallel/parallel-20170922.tar.bz2
+tar xvf parallel-20170922.tar.bz2
+mv parallel-20170922/src/parallel .
+rm -r parallel-20170922*
+```
+
+TODO: add notes on obtaining and compiling World & Reaper & other necessary things. For now, look at  `script_data/data_config.txt` to see the dependencies.
+
+  
+<!-- # 
+# ### World and Reaper:
+# # zip from https://github.com/CSTR-Edinburgh/merlin
+# 
+# cd ~/tool/merlin-master/
+#   503  cd tools/WORLD_v2/
+#   504  ls
+#   505  more makefile 
+#   506  make
+#   507  make test
+#   508  ls
+#   511  less makefile 
+#   512  make analysis synth
+#   
+
+# 
+# cd ~/tool/merlin-master/
+#   503  cd tools/WORLD/
+#   504  ls
+#   505  more makefile 
+#   506  make
+#   507  make test
+#   512  make analysis synth
+#   
+#   
+#   
+#   # https://github.com/google/REAPER
+#   
+#   cd /afs/inf.ed.ac.uk/user/o/owatts/tool/REAPER-master
+# mkdir build   # In the REAPER top-level directory
+# cd build
+# cmake ..
+# make
+# 
+ -->
+
+
+
+Extract  data -- edit `script_data/data_config.txt` and, using 30 cores on CSTR server zamora:
+
+```
+./script_data/extract_feats_parallel.sh /afs/inf.ed.ac.uk/group/cstr/projects/blizzard_entries/blizzard2017/data/segmented/wav/ /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data
+```
+
+
+... then using 4 cores on my DICE desktop salton:
+
+
+```
+./script_data/resample_feats_parallel.sh /afs/inf.ed.ac.uk/group/cstr/projects/blizzard_entries/blizzard2017/data/segmented/wav/ /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data
+```
+
+Note: initially, extraction and resampling were done with a single script. When using many cores on CSTR servers, the Python code for resampling really slowed things down. I separated the code until I have chance to debug this properly.
+
+
+
+<!-- 
+./script_data/extract_feats_parallel.sh ~/sim2/oliver/slm_data_work/fls_hybrid/wav29/ ~/sim2/oliver/slm_data_work/fls_hybrid/feat_29/
+ -->
 ## Running the tools
 
 ### Example configuration files 
