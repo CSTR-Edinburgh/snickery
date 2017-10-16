@@ -1,0 +1,22 @@
+
+
+
+N_FILES_TO_EXTRACT=0    ## 0 to extract all, set to a lower number for e.g. debugging scripts
+N_PARALLEL_JOBS=4 # 30 # 20 # 4
+
+
+
+
+## Locations of tools for data extraction:
+
+WORLD_A=/afs/inf.ed.ac.uk/user/o/owatts/tool/merlin-master/tools/WORLD/build/analysis
+WORLD_S=/afs/inf.ed.ac.uk/user/o/owatts/tool/merlin-master/tools/WORLD/build/synth
+
+REAPER=/afs/inf.ed.ac.uk/user/o/owatts/tool/REAPER-master/build/reaper
+
+SPTK=/afs/inf.ed.ac.uk/user/o/owatts/repos/dnn_swahili/dnn_tts/tools/SPTK-3.7/bin
+SOX=/usr/bin/sox
+
+
+CH_WAVE=/afs/inf.ed.ac.uk/user/o/owatts/tool/momel/speech_tools/main/ch_wave
+HCOPY=/afs/inf.ed.ac.uk/user/o/owatts/repos/simple4all/CSTRVoiceClone/trunk/bin/HCopy
