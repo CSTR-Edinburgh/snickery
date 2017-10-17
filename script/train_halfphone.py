@@ -136,8 +136,8 @@ def main_work(config, overwrite_existing_data=False):
     filenames_dset = f.create_dataset("filenames", (n_units,), maxshape=(n_units,), dtype='|S50') 
     cutpoints_dset = f.create_dataset("cutpoints", (n_units,2), maxshape=(n_units,2), dtype='i') 
 
-    # TODO: hardcoded for natural2
-    join_contexts_dset = f.create_dataset("join_contexts", (n_units + 1, 2*join_dim), maxshape=(n_units + 1, 2*join_dim), dtype='f') 
+    # TODO: hardcoded for pitch sync cost
+    join_contexts_dset = f.create_dataset("join_contexts", (n_units + 1, join_dim), maxshape=(n_units + 1, join_dim), dtype='f') 
 
     ## Optionally dump some extra data which can be used for training a better join cost:-
     if config['dump_join_data']:
@@ -163,7 +163,12 @@ def main_work(config, overwrite_existing_data=False):
         if not (os.path.isfile(wname) or os.path.isfile(pm_file)):
             print 'Warning: no wave or pm -- skip!'
             continue
-                   
+
+        ## Get pitchmarks (to join halfphones on detected GCIs):-
+        pms_seconds = read_pm(pm_file)
+        if pms_seconds.shape == (1,1):
+            print 'Warning: trouble reading pm file -- skip!'
+            continue                    
 
         ### Get speech params for target cost (i.e. probably re-generated speech for consistency):
         t_speech = compose_speech(target_feat_dir, base, stream_list_target, datadims_target) 
@@ -173,21 +178,34 @@ def main_work(config, overwrite_existing_data=False):
             t_speech = standardise(t_speech, mean_vec_target, std_vec_target)
 
 
-        ### Get speech params for join cost (i.e. probably natural speech):
+        ### Get speech params for join cost (i.e. probably natural speech).
+        ### These are now expected to have already been resampled so that they are pitch-synchronous. 
         j_speech = compose_speech(join_feat_dir, base, stream_list_join, datadims_join)
-        if j_speech.shape == [1,1]:  ## bad return value  
+        print j_speech.shape
+        if j_speech.size == 1:  ## bad return value  
             continue                    
         if config['standardise_join_data']:
-            j_speech = standardise(j_speech, mean_vec_join, std_vec_join)
+            j_speech = standardise(j_speech, mean_vec_join, std_vec_join)                        
+        j_frames, j_dim = j_speech.shape
+        if j_frames != len(pms_seconds):  
+            print (j_frames, len(pms_seconds))
+            print 'Warning: number of rows in join cost features not same as number of pitchmarks:'
+            print 'these features should be pitch synchronous. Skipping utterance!'
+            continue  
+        # j_speech = j_speech[1:-1,:]  ## remove first and last frames corresponding to terminal pms
+        # j_frames -= 2
+
 
         ### get labels:
         labs = read_label(labfile, config['quinphone_regex'])
-        label_frames = labs[-1][0][1]
+        label_frames = labs[-1][0][1] ## = How many (5msec) frames does label correspond to?
 
         ## Has silence been trimmed from either t_speech or j_speech?
-        if config.get('untrim_silence_join_speech', False):
-            print 'Add trimmed silence back to join cost speech features'
-            j_speech = reinsert_terminal_silence(j_speech, labs)
+
+        ## Assume pitch synch join features are not silence trimmed
+        # if config.get('untrim_silence_join_speech', False):
+        #     print 'Add trimmed silence back to join cost speech features'
+        #     j_speech = reinsert_terminal_silence(j_speech, labs)
 
         if config.get('untrim_silence_target_speech', False):
             print 'Add trimmed silence back to target cost speech features'
@@ -204,15 +222,18 @@ def main_work(config, overwrite_existing_data=False):
      
         ## Pad or trim speech to match the length of the labels (within a certain tolerance):-
         t_speech = pad_speech_to_length(t_speech, labs)
-        j_speech = pad_speech_to_length(j_speech, labs)
+
+        if DODEBUG:
+            check_pitch_sync_speech(j_speech, labs, pms_seconds)
+        #j_speech = pad_speech_to_length(j_speech, labs) ## Assume pitch synch join features are all OK
 
         ## Discard sentences where length of speech and labels differs too much:- 
         if t_speech.size==1:
             print 'Skip utterance'
             continue
-        if j_speech.size==1:
-            print 'Skip utterance'            
-            continue
+        # if j_speech.size==1:
+        #     print 'Skip utterance'            
+        #     continue
 
         ## Get representations of half phones to use in target cost:-
         unit_names, unit_features, timings = get_halfphone_stats(t_speech, labs)
@@ -220,15 +241,12 @@ def main_work(config, overwrite_existing_data=False):
         if config['dump_join_data']:
             start_join_feats, end_join_feats = get_join_data_AL(j_speech, timings, config['join_cost_halfwidth'])
 
-        ## Get pitchmarks (to join halfphones on detected GCIs):-
-        pms_seconds = read_pm(pm_file)
-        if pms_seconds.shape == (1,1):
-            print 'Warning: trouble reading pm file -- skip!'
-            continue                
-        cutpoints = get_cutpoints(timings, pms_seconds)
+        ## Find 'cutpoints': pitchmarks which are considered to be the boudnaries of units, and where those
+        ## units will be concatenated:
+        cutpoints, cutpoint_indices = get_cutpoints(timings, pms_seconds)
 
-
-        context_data = get_contexts_for_natural_joincost(j_speech, timings, width=2)
+        #context_data = get_contexts_for_natural_joincost(j_speech, timings, width=2)
+        context_data = get_contexts_for_pitch_synchronous_joincost(j_speech, cutpoint_indices)
 
         filenames = [base] * len(cutpoints)
 
@@ -286,6 +304,16 @@ def main_work(config, overwrite_existing_data=False):
         for thing in fjoin.values():
             print thing
         fjoin.close()
+
+def check_pitch_sync_speech(j_speech, labs, pms_seconds):
+    print '-----------------------'
+    print 'check_pitch_sync_speech'
+    print j_speech.shape
+    print labs[-1]
+    print len(pms_seconds)
+    print
+
+
 
 
 def reinsert_terminal_silence(speech, labels, silence_symbols=['#']):
@@ -410,14 +438,15 @@ def compose_speech(indir, base, stream_list, datadims):
     where there is trouble, signal this by returning a 1 x 1 matrix
     '''
 
-    mgc_fn = os.path.join(indir, 'mgc', base+'.mgc' ) 
-    f0_fn = os.path.join(indir, 'f0', base+'.f0' ) 
-    ap_fn = os.path.join(indir, 'ap', base+'.ap' ) 
+    # mgc_fn = os.path.join(indir, 'mgc', base+'.mgc' ) 
+    # f0_fn = os.path.join(indir, 'f0', base+'.f0' ) 
+    # ap_fn = os.path.join(indir, 'ap', base+'.ap' ) 
 
     stream_data_list = []
     for stream in stream_list:
         stream_fname = os.path.join(indir, stream, base+'.'+stream ) 
         if not os.path.isfile(stream_fname):
+            print stream_fname + ' does not exist'
             return np.zeros((1,1))
         stream_data = get_speech(stream_fname, datadims[stream])
         
@@ -492,6 +521,10 @@ def make_train_condition_name(config):
 
 
 def read_label(labfile, quinphone_regex):
+    '''
+    Return list with entries like:  ((start_frame, end_frame), [ll,l,c,r,,rr,state_number]).
+    The typical labels input mean that end frame of item at t-1 is same as start frame at t. 
+    '''
     f = open(labfile, 'r')
     lines = f.readlines()
     f.close()
@@ -515,19 +548,24 @@ def read_label(labfile, quinphone_regex):
 
 def get_cutpoints(timings, pms):
     '''
-    Find GCIs which are nearest to the start and end of each unit
+    Find GCIs which are nearest to the start and end of each unit.
+    Also return indices of GCIs so we can map easily to pitch-synchronous features.
     '''
     cutpoints = []
+    indices = []
     for (start, end) in timings:
         start_sec = start * 0.005  # TODO: unhardcode frameshift and rate
         end_sec = (end) * 0.005
         start_closest_ix = numpy.argmin(numpy.abs(pms - start_sec))
         end_closest_ix = numpy.argmin(numpy.abs(pms - end_sec))
+        indices.append((start_closest_ix, end_closest_ix))
         cutpoints.append((pms[start_closest_ix], pms[end_closest_ix]))
+
+    indices = np.array(indices, dtype=int)
     cutpoints = np.array(cutpoints)
-    cutpoints *= 48000
+    cutpoints *= 48000             # TODO: unhardcode frameshift and rate
     cutpoints = np.array(cutpoints, dtype=int)
-    return cutpoints
+    return (cutpoints, indices)
 
 
 def get_halfphone_stats(speech, labels):
@@ -596,6 +634,37 @@ def get_halfphone_stats(speech, labels):
     names = np.array(names)
     timings = zip(starts,ends)
     return (names, features, timings)
+
+
+
+
+def get_contexts_for_pitch_synchronous_joincost(speech, pm_indices):
+    '''
+    pm_indices: start and end indices of pitchmarks considered to be unit cutpoints: 
+        [[  0   1]
+         [  1   5]
+         [  5  12]
+         [ 12  17] ...
+    Because speech features used for join cost are expected to be already pitch synchronous or 
+    synchronised, we can index rows of speech directly with these.
+
+    Where pm_indices gives indices for n units (n rows), return (n+1 x dim) matrix, each row of which 
+    gives a 'join context' for the end of a unit. Row p gives the start join context for 
+    unit p, and the end join context for unit p-1. 
+    ''' 
+    # enforce that t end is same as t+1 start -- TODO: do this check sooner, on the labels?  
+    assert pm_indices[1:, 0].all() == pm_indices[:-1, 1].all()
+
+    ## convert n -> n+1 with shared indices:
+    last_end = pm_indices[-1][1]
+    starts = np.array([s for (s,e) in pm_indices] + [last_end])
+
+    # print '=========='
+    # print speech.shape
+    # print starts
+    context_frames = speech[starts, :]
+
+    return context_frames
 
 
 
