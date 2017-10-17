@@ -27,6 +27,30 @@ from util import splice_data, unsplice, safe_makedir
 from const import label_delimiter, vuv_stream_names, label_length_diff_tolerance
 
 
+def locate_stream_directories(directories, streams):
+    '''
+    For each stream in streams, find a subdirectory for some directory in 
+    directories, directory/stream. Make sure that there is only 1 such subdirectory
+    named after the stream. Return dict mapping from stream names to directory locations. 
+    '''
+    stream_directories = {}
+    for stream in streams:
+        for directory in directories:
+            candidate_dir = os.path.join(directory, stream)
+            if os.path.isdir(candidate_dir):
+                ## check unique:
+                if stream in stream_directories:
+                    sys.exit('Found at least 2 directories for stream %s: %s and %s'%(stream, stream_directories[stream], candidate_dir))
+                stream_directories[stream] = candidate_dir
+    ## check we found a location for each stream:
+    for stream in streams:
+        if stream not in stream_directories:
+            sys.exit('No subdirectory found under %s for stream %s'%(','.join(directories), stream))
+    return stream_directories
+
+
+
+
 def main_work(config, overwrite_existing_data=False):
     
     ## (temporary) assertions:-
@@ -40,8 +64,8 @@ def main_work(config, overwrite_existing_data=False):
         else:
             os.system('rm '+database_fname)
             
-    target_feat_dir = config['target_datadir']
-    join_feat_dir = config['join_datadir']
+    target_feat_dirs = config['target_datadirs']
+    join_feat_dirs = config['join_datadirs']
 
     datadims_join = config['datadims_join']
     datadims_target = config['datadims_target']
@@ -51,18 +75,20 @@ def main_work(config, overwrite_existing_data=False):
     stream_list_join = config['stream_list_join']    
     stream_list_target = config['stream_list_target'] 
     
-    ## check feature directories exist
-    for stream in stream_list_target:
-        stream_dir = os.path.join(target_feat_dir, stream)
-        assert os.path.isdir(stream_dir), 'Directory %s not accessible'%(stream_dir)
-    for stream in stream_list_join:        
-        stream_dir = os.path.join(join_feat_dir, stream)
-        assert os.path.isdir(stream_dir), 'Directory %s not accessible'%(stream_dir)
-    
+    ## get dicts mapping e.g. 'mgc': '/path/to/mgc/'
+    target_stream_dirs = locate_stream_directories(target_feat_dirs, stream_list_target)
+    join_stream_dirs   = locate_stream_directories(join_feat_dirs, stream_list_join)
 
+    # for stream in stream_list_target:
+    #     stream_dir = os.path.join(target_feat_dir, stream)
+    #     assert os.path.isdir(stream_dir), 'Directory %s not accessible'%(stream_dir)
+    # for stream in stream_list_join:        
+    #     stream_dir = os.path.join(join_feat_dir, stream)
+    #     assert os.path.isdir(stream_dir), 'Directory %s not accessible'%(stream_dir)
+    
     ## work out initial list of training utterances based on files present in first stream subdir: 
     first_stream = stream_list_target[0] ## <-- typically, mgc
-    utt_list = sorted(glob.glob(os.path.join(target_feat_dir, first_stream)+'/*.' + first_stream))
+    utt_list = sorted(glob.glob(target_stream_dirs[first_stream] +'/*.' + first_stream))
     flist = [os.path.split(fname)[-1].replace('.'+first_stream,'') for fname in utt_list]
     
     if type(n_train_utts) == int:
@@ -86,8 +112,8 @@ def main_work(config, overwrite_existing_data=False):
 
 
     ## 1A) First pass: get mean and std per stream for each of {target,join}
-    (mean_vec_target, std_vec_target) = get_mean_std(target_feat_dir, stream_list_target, datadims_target, flist)
-    (mean_vec_join, std_vec_join) = get_mean_std(join_feat_dir, stream_list_join, datadims_join, flist)
+    (mean_vec_target, std_vec_target) = get_mean_std(target_stream_dirs, stream_list_target, datadims_target, flist)
+    (mean_vec_join, std_vec_join) = get_mean_std(join_stream_dirs, stream_list_join, datadims_join, flist)
 
 
 
@@ -171,7 +197,7 @@ def main_work(config, overwrite_existing_data=False):
             continue                    
 
         ### Get speech params for target cost (i.e. probably re-generated speech for consistency):
-        t_speech = compose_speech(target_feat_dir, base, stream_list_target, datadims_target) 
+        t_speech = compose_speech(target_stream_dirs, base, stream_list_target, datadims_target) 
         if t_speech.shape == [1,1]:  ## bad return value  
             continue                    
         if config['standardise_target_data']:
@@ -180,7 +206,7 @@ def main_work(config, overwrite_existing_data=False):
 
         ### Get speech params for join cost (i.e. probably natural speech).
         ### These are now expected to have already been resampled so that they are pitch-synchronous. 
-        j_speech = compose_speech(join_feat_dir, base, stream_list_join, datadims_join)
+        j_speech = compose_speech(join_stream_dirs, base, stream_list_join, datadims_join)
         print j_speech.shape
         if j_speech.size == 1:  ## bad return value  
             continue                    
@@ -433,7 +459,7 @@ def debug(msg):
     if DODEBUG:
         print msg
     
-def compose_speech(indir, base, stream_list, datadims):
+def compose_speech(feat_dir_dict, base, stream_list, datadims):
     '''
     where there is trouble, signal this by returning a 1 x 1 matrix
     '''
@@ -444,7 +470,7 @@ def compose_speech(indir, base, stream_list, datadims):
 
     stream_data_list = []
     for stream in stream_list:
-        stream_fname = os.path.join(indir, stream, base+'.'+stream ) 
+        stream_fname = os.path.join(feat_dir_dict[stream], base+'.'+stream ) 
         if not os.path.isfile(stream_fname):
             print stream_fname + ' does not exist'
             return np.zeros((1,1))
@@ -761,12 +787,12 @@ def get_join_data_AL(speech, timings, halfwidth):
 
 
 
-def get_mean_std(feat_dir, stream_list, datadims, flist):
+def get_mean_std(feat_dir_dict, stream_list, datadims, flist):
 
     means = {}
     stds = {}
     for stream in stream_list:
-        stream_files = [os.path.join(feat_dir, stream, base+'.'+stream) for base in flist]
+        stream_files = [os.path.join(feat_dir_dict[stream], base+'.'+stream) for base in flist]
         if stream in vuv_stream_names:
             means[stream], _ = get_mean(stream_files, datadims[stream], exclude_uv=True)
             stds[stream] = get_std(stream_files, datadims[stream], means[stream], exclude_uv=True)

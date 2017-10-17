@@ -23,7 +23,8 @@ from util import safe_makedir, vector_to_string
 from speech_manip import read_wave, write_wave, weight
 from label_manip import break_quinphone, extract_monophone
 from train_halfphone import get_data_dump_name, compose_speech, standardise, \
-        read_label, get_halfphone_stats, reinsert_terminal_silence, make_train_condition_name
+        read_label, get_halfphone_stats, reinsert_terminal_silence, make_train_condition_name, \
+        locate_stream_directories
 
 DODEBUG=False ## print debug information?
 
@@ -165,7 +166,10 @@ class Synthesiser(object):
         print 'Database loaded'
         print '\n\n----------\n\n'
 
-
+        self.test_data_target_dirs = locate_stream_directories(self.config['test_data_dirs'], self.stream_list_target)
+        print 'Found target directories: %s'%(self.test_data_target_dirs)
+        print 
+        print 
         
 
     def test_concatenation_code(self):
@@ -179,7 +183,8 @@ class Synthesiser(object):
 
         print 'synth_from_config'
 
-        test_flist = sorted(glob.glob(self.config['test_data_dir'] + '/mgc/*.mgc'))
+        first_stream = self.stream_list_target[0]
+        test_flist = sorted(glob.glob(self.test_data_target_dirs[first_stream] + '/*.' + first_stream))
 
         ## find all files containing one of the patterns in test_patterns
         
@@ -252,7 +257,7 @@ class Synthesiser(object):
         outstem = os.path.join(synth_dir, base)       
 
         start_time = start_clock('Get speech ')
-        speech = compose_speech(self.config['test_data_dir'], base, self.stream_list_target, \
+        speech = compose_speech(self.test_data_target_dirs, base, self.stream_list_target, \
                                 self.config['datadims_target']) 
 
         m,dim = speech.shape
