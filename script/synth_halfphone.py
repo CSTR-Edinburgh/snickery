@@ -31,7 +31,7 @@ DODEBUG=False ## print debug information?
 from train_halfphone import debug
 
 
-# import pylab
+import pylab
 
 WRAPFST=True # True: used python bindings (pywrapfst) to OpenFST; False: use command line interface
 
@@ -84,7 +84,7 @@ class Synthesiser(object):
         datadims_join = self.config['datadims_join']
 
         self.target_weight_vector = np.array(self.config['feature_weights_target'] + self.config['feature_weights_target'])
-        self.join_weight_vector   = np.array(self.config['feature_weights_join']   + self.config['feature_weights_join'] )    ### TODO: currently hardcoded for natural2
+        self.join_weight_vector   = np.array(self.config['feature_weights_join'] )    ### TODO: currently hardcoded for pitch sync cost
         assert len(self.target_weight_vector) == sum(datadims_target.values()) * 2
 
         print 'load database...'        
@@ -166,13 +166,16 @@ class Synthesiser(object):
         print '\n\n----------\n\n'
 
 
+        
+
     def test_concatenation_code(self):
         ofile = '/afs/inf.ed.ac.uk/user/o/owatts/temp/concat_test.wav'
         print 'concatenate the start of the training data, output here: %s'%(ofile)
         self.concatenate(np.arange(100, 150), ofile)    
         
 
-    def synth_from_config(self):
+
+    def synth_from_config(self, inspect_join_weights_only=False):
 
         print 'synth_from_config'
 
@@ -200,8 +203,24 @@ class Synthesiser(object):
         else:
             print 'synthesising %s utternances based on config'%(ntest)
 
+        all_distances = []
         for fname in test_flist:
-            self.synth_utt(fname)    
+            if inspect_join_weights_only:
+                all_distances.append(self.inspect_join_weights_on_utt(fname))
+                print 'single utt -- break'
+                break 
+            else:
+                self.synth_utt(fname)    
+
+
+        if inspect_join_weights_only:
+            all_distances = np.vstack(all_distances)
+            m,n = all_distances.shape
+            for stream in range(n):
+                pylab.hist(all_distances[:,stream], bins=30, alpha=0.7)
+            pylab.show()
+
+
 
     def make_synthesis_condition_name(self):
         '''
@@ -299,7 +318,6 @@ class Synthesiser(object):
             stop_clock(start_time)          
 
 
-
             start_time = start_clock('Compute target distances...')
             zero_target_cost = False
             if zero_target_cost:
@@ -318,6 +336,8 @@ class Synthesiser(object):
         else:
             sys.exit('preselection_method unknown')
 
+
+    
         start_time = start_clock('Make target FST')
         if WRAPFST:
             T = make_target_sausage_lattice(distances, candidates)        
@@ -335,15 +355,23 @@ class Synthesiser(object):
         else:
             self.join_cost_file = '/tmp/join.fst'  ## TODO: don't rely on /tmp/ !           
             ## TODO: WRAPFST  
+
             self.make_on_the_fly_join_lattice(candidates, self.join_cost_file)
+
+
             t = start_clock('    COMPILE')
             compile_fst(self.tool, self.join_cost_file, self.join_cost_file + '.bin')
             stop_clock(t)
+
+
             #print 'sleep 1...'
  #           os.system('sleep 1')  
         #stop_clock(start_time)          
 
     
+
+
+
 
         start_time = start_clock('Compose and find shortest path')  
         if WRAPFST:
@@ -418,6 +446,114 @@ class Synthesiser(object):
             mean_dists = np.mean(distances, axis=1)
             std_dists = np.std(distances, axis=1)
             print zip(dists, mean_dists, std_dists)
+
+
+
+
+    def inspect_join_weights_on_utt(self, fname):
+
+        # if self.inspect_join_weights:
+        #     self.config['preselection_method'] = 'quinphone'
+        #     self.config['n_candidates'] = 10000 # some very large number
+
+
+        # train_condition = make_train_condition_name(self.config)
+        # synth_condition = self.make_synthesis_condition_name()
+        # synth_dir = os.path.join(self.config['workdir'], 'synthesis', train_condition, synth_condition)
+        # safe_makedir(synth_dir)
+            
+        junk,base = os.path.split(fname)
+        print '               ==== SYNTHESISE %s ===='%(base)
+        base = base.replace('.mgc','')
+        #outstem = os.path.join(synth_dir, base)       
+
+        # start_time = start_clock('Get speech ')
+        speech = compose_speech(self.config['test_data_dir'], base, self.stream_list_target, \
+                                self.config['datadims_target']) 
+
+        # m,dim = speech.shape
+
+        # if (self.config['standardise_target_data'], True):                                
+        #     speech = standardise(speech, self.mean_vec_target, self.std_vec_target)         
+        
+        #fshift_seconds = (0.001 * self.config['frameshift_ms'])
+        #fshift = int(self.config['sample_rate'] * fshift_seconds)        
+
+        labfile = os.path.join(self.config['test_lab_dir'], base + '.' + self.config['lab_extension'])
+        labs = read_label(labfile, self.quinphone_regex)
+
+        if self.config.get('untrim_silence_target_speech', False):
+            speech = reinsert_terminal_silence(speech, labs)
+
+        if self.config.get('suppress_weird_festival_pauses', False):
+            labs = suppress_weird_festival_pauses(labs)
+
+        unit_names, unit_features, unit_timings = get_halfphone_stats(speech, labs)
+       
+        # if self.config['weight_target_data']:                                
+        #     unit_features = weight(unit_features, self.target_weight_vector)       
+
+        #print unit_features
+        #print unit_names
+
+        # n_units = len(unit_names)
+        # stop_clock(start_time)
+
+
+        # if self.config['preselection_method'] == 'acoustic':
+
+        #     start_time = start_clock('Acoustic select units ')
+        #     ## call has same syntax for sklearn and scipy KDTrees:--
+        #     distances, candidates = self.tree.query(unit_features, k=self.config['n_candidates'])
+        #     stop_clock(start_time) 
+
+
+
+
+
+        ##### self.config['preselection_method'] == 'quinphone':
+        self.config['n_candidates'] = 100 ### large number
+        start_time = start_clock('Preselect units (quinphone criterion) ')
+        candidates = []
+        for quinphone in unit_names:
+            current_candidates = []
+            mono, diphone, triphone, quinphone = break_quinphone(quinphone) 
+            for form in [quinphone, triphone, diphone, mono]:
+                for unit in self.unit_index.get(form, []):
+                    current_candidates.append(unit)
+                    if len(current_candidates) == self.config['n_candidates']:
+                        break
+                if len(current_candidates) == self.config['n_candidates']:
+                    break
+            if len(current_candidates) == 0:
+                sys.exit('no cands in training data to match %s! TODO: add backoff...'%(quinphone))
+            if len(current_candidates) != self.config['n_candidates']:
+                print 'W',
+                #print 'Warning: only %s candidates for %s (%s)' % (len(current_candidates), quinphone, current_candidates)
+                difference = self.config['n_candidates'] - len(current_candidates) 
+                current_candidates += [-1]*difference
+            candidates.append(current_candidates)
+        candidates = np.array(candidates)
+        stop_clock(start_time)         
+
+
+
+        print 'get join costs...'
+        self.join_cost_file = '/tmp/join.fst'  ## TODO: don't rely on /tmp/ !           
+        
+        print 
+        j_distances = self.make_on_the_fly_join_lattice(candidates, self.join_cost_file, by_stream=True)
+        j_distances = np.array(j_distances.values())
+
+        # pylab.hist(j_distances.values(), bins=30)
+        # pylab.show()
+        #print distances
+        print 'Skip full synthesis -- only want to look at the weights...'
+        return j_distances
+
+
+
+
 
     def retrieve_speech_OLD(self, index):
         if self.config['hold_waves_in_memory']:
@@ -535,7 +671,26 @@ class Synthesiser(object):
         distance = (1.0 / order) * math.sqrt(np.sum(sq_diffs))   
         return distance
 
-    def make_on_the_fly_join_lattice(self, ind, outfile, join_cost_weight=1.0):
+
+    def get_natural_distance_by_stream(self, first, second, order=2):
+        '''
+        first and second: indices of left and right units to be joined
+        order: number of frames of overlap
+        '''
+        sq_diffs = (self.unit_end_data[first,:] - self.unit_start_data[second,:])**2
+        ## already weighted, skip next line:
+        #sq_diffs *= self.join_weight_vector
+        start = 0
+        distance_by_stream = []
+        for (stream_width, stream_name) in [(1,'energy'),(12,'mfcc')]:
+            distance_by_stream.append((1.0 / order) * math.sqrt(np.sum(sq_diffs[start:start+stream_width])) )
+            start += stream_width
+
+        distance = (1.0 / order) * math.sqrt(np.sum(sq_diffs))   
+        return (distance, distance_by_stream)
+
+
+    def make_on_the_fly_join_lattice(self, ind, outfile, join_cost_weight=1.0, by_stream=False):
 
         ## These are irrelevant when using halfphones -- suppress them:
         forbid_repetition = False # self.config['forbid_repetition']
@@ -543,8 +698,8 @@ class Synthesiser(object):
 
         ## For now, force join cost to be natural2
         join_cost_type = self.config['join_cost_type']
-        join_cost_type = 'natural2'
-        assert join_cost_type in ['natural2']
+        join_cost_type = 'pitch_sync'
+        assert join_cost_type in ['pitch_sync']
 
         start = 0
         frames, cands = np.shape(ind)
@@ -555,13 +710,15 @@ class Synthesiser(object):
         ## This can save  computing things twice, 52 seconds -> 33 (335 frames, 50 candidates) 
         ## (Probably no saving with half phones?)
         cost_cache = {} 
-            
+        
+        cost_cache_by_stream = {}
+
         ## set limits to not go out of range -- unnecessary given new unit_end_data and unit_start_data?
-        if join_cost_type == 'natural2':
+        if join_cost_type == 'pitch_sync':
             mini = 1 
             maxi = data_frames - 1              
         else:
-            sys.exit('dvsdvsedv')
+            sys.exit('dvsdvsedv098987897')
         
         t = start_clock('     DISTS')
         for i in range(frames-1): 
@@ -577,8 +734,12 @@ class Synthesiser(object):
                     if (first, second) in cost_cache:
                         continue
                     
-                    if  join_cost_type == 'natural2':
-                        weight = self.get_natural_distance(first, second, order=2)
+                    if  join_cost_type == 'pitch_sync' and by_stream:
+                        weight, weight_by_stream = self.get_natural_distance_by_stream(first, second, order=1)
+                        cost_cache_by_stream[(first, second)] = weight_by_stream
+                    elif  join_cost_type == 'pitch_sync':
+                        weight = self.get_natural_distance(first, second, order=1)
+
 
                     else:
                         sys.exit('Unknown join cost type: %s'%(join_cost_type))
@@ -591,6 +752,8 @@ class Synthesiser(object):
                         if (first - second) in range(forbid_regression+1):
                             weight = VERY_BIG_WEIGHT_VALUE
                     cost_cache[(first, second)] = weight
+                    
+
         stop_clock(t)
 
         t = start_clock('      WRITE')
@@ -604,6 +767,8 @@ class Synthesiser(object):
         cost_cache_to_text_fst(cost_cache, outfile, join_cost_weight=join_cost_weight)
         stop_clock(t)
 
+        if by_stream:
+            return cost_cache_by_stream
 
 
     def make_on_the_fly_join_lattice_PDIST(self, ind, outfile, join_cost_weight=1.0):
@@ -647,7 +812,7 @@ class Synthesiser(object):
             mini = 1 # 0-self.context_padding
             maxi = data_frames - 1 # (self.context_padding + 1 )                
         else:
-            sys.exit('dvsdvsedv')
+            sys.exit('dvsdvsedv1222')
         
 
         t = start_clock('  ---> DISTS ')
@@ -774,3 +939,6 @@ if __name__ == '__main__':
     #synth.test_concatenation_code()
     
     synth.synth_from_config()
+
+    #synth.synth_from_config(inspect_join_weights_only=True)
+
