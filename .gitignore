@@ -1,3 +1,17 @@
+## Make sure no restrictively-licensed (e.g. GNU) code is committed:
+
+script_data/parallel*
+
+
+## Do not commit PDFs
+doc/essay_2.pdf
+
+
+
+
+
+## The rest consists of standard automatically generated GitHub ignores for Python project:
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
