@@ -41,17 +41,28 @@ if WRAPFST:
 else:
     from fst_functions import compile_fst, make_t_lattice_SIMP, cost_cache_to_text_fst, get_best_path_SIMP, compile_lm_fst, make_mapping_loop_fst
 
-
+import const
 from const import label_delimiter
 
 
+
+import matplotlib.pyplot as plt; plt.rcdefaults()
+import matplotlib.pyplot as plt
+
+
+verbose = True # False
+
+
+## TODO_ verbosity level -- logging?
 def start_clock(comment):
-    print '%s... '%(comment),
+    if verbose:
+        print '%s... '%(comment),    
     return (timeit.default_timer(), comment)
 
 def stop_clock((start_time, comment), width=40):
     padding = (width - len(comment)) * ' '
-    print '%s--> took %.2f seconds' % (padding, (timeit.default_timer() - start_time))  ##  / 60.)  ## min
+    if verbose:
+        print '%s--> took %.2f seconds' % (padding, (timeit.default_timer() - start_time))  ##  / 60.)  ## min
 
 def suppress_weird_festival_pauses(label, replace_list=['B_150'], replacement='pau'):
     outlabel = []
@@ -71,6 +82,10 @@ class Synthesiser(object):
 
     def __init__(self, config_file):
 
+
+        self.mode_of_operation = 'normal'
+        self.verbose = True
+
         print 'Load config...'
         self.config = {}
         execfile(config_file, self.config)
@@ -81,12 +96,13 @@ class Synthesiser(object):
 
         print 'Prepare weights from config'
         ### TODO: check!
-        datadims_target = self.config['datadims_target']
-        datadims_join = self.config['datadims_join']
+        self.datadims_target = self.config['datadims_target']
+        self.datadims_join = self.config['datadims_join']
 
-        self.target_weight_vector = np.array(self.config['feature_weights_target'] + self.config['feature_weights_target'])
-        self.join_weight_vector   = np.array(self.config['feature_weights_join'] )    ### TODO: currently hardcoded for pitch sync cost
-        assert len(self.target_weight_vector) == sum(datadims_target.values()) * 2
+
+        # self.target_weight_vector = np.array(self.config['feature_weights_target'] + self.config['feature_weights_target'])
+        # self.join_weight_vector   = np.array(self.config['feature_weights_join'] )    ### TODO: currently hardcoded for pitch sync cost
+        # assert len(self.target_weight_vector) == sum(self.datadims_target.values()) * 2
 
         print 'load database...'        
         datafile = get_data_dump_name(self.config)
@@ -94,7 +110,7 @@ class Synthesiser(object):
             sys.exit('data: \n   %s   \ndoes not exist -- try other?'%(datafile))
             
         f = h5py.File(datafile, "r")
-        self.train_unit_features = f["train_unit_features"][:,:]
+        self.train_unit_features_unweighted = f["train_unit_features"][:,:]
         self.train_unit_names = f["train_unit_names"][:] 
         self.train_cutpoints = f["cutpoints"][:] 
         self.train_filenames = f["filenames"][:]                 
@@ -103,20 +119,18 @@ class Synthesiser(object):
         self.mean_vec_join = f["mean_join"][:] 
         self.std_vec_join = f["std_join"][:] 
 
-        join_contexts = f["join_contexts"][:,:]
+        self.join_contexts_unweighted = f["join_contexts"][:,:]
         f.close()
 
-        self.number_of_units, _ = self.train_unit_features.shape
+        self.number_of_units, _ = self.train_unit_features_unweighted.shape
 
         if self.config.get('weight_target_data', True):
-            self.train_unit_features = weight(self.train_unit_features, self.target_weight_vector)   
-
+            self.set_target_weights(self.config['target_stream_weights'])
         if self.config.get('weight_join_data', True):
-            join_contexts = weight(join_contexts, self.join_weight_vector)   
+            self.set_join_weights(self.config['join_stream_weights'])
 
-        ## This should not copy:
-        self.unit_end_data = join_contexts[1:,:]
-        self.unit_start_data = join_contexts[:-1,:]
+        self.first_silent_unit = 0 ## assume first unit is a silence, for v naive backoff
+
 
         self.quinphone_regex = re.compile(self.config['quinphone_regex'])
 
@@ -172,6 +186,43 @@ class Synthesiser(object):
         print 
         
 
+    def set_join_weights(self, weights):
+        assert len(weights) == len(self.stream_list_join)
+        ## get from per-stream to per-coeff weights:
+        join_weight_vector = []
+        for (i,stream) in enumerate(self.stream_list_join):
+            if stream in const.vuv_stream_names:
+                join_weight_vector.extend([weights[i]]*2)
+            else:
+                join_weight_vector.extend([weights[i]]*self.datadims_join[stream])
+        join_weight_vector = np.array(join_weight_vector)
+        join_contexts_weighted = weight(self.join_contexts_unweighted, join_weight_vector)   
+
+        ## This should not copy:
+        self.unit_end_data = join_contexts_weighted[1:,:]
+        self.unit_start_data = join_contexts_weighted[:-1,:]
+
+        # print 'applied join_weight_vector'
+        # print join_weight_vector
+
+    def set_target_weights(self, weights):
+        assert len(weights) == len(self.stream_list_target)
+        ## get from per-stream to per-coeff weights:
+        target_weight_vector = []
+        for (i,stream) in enumerate(self.stream_list_target):
+            if stream in const.vuv_stream_names:
+                target_weight_vector.extend([weights[i]]*2)
+            else:
+                target_weight_vector.extend([weights[i]]*self.datadims_target[stream])
+        target_weight_vector = np.array(target_weight_vector + target_weight_vector)    ### TODO: doubled!     
+        self.train_unit_features = weight(self.train_unit_features_unweighted, target_weight_vector)   
+
+        ## save this so we can weight incoming predicted acoustics: 
+        self.target_weight_vector = target_weight_vector
+
+        # print 'applied taget_weight_vector'
+        # print target_weight_vector
+
     def test_concatenation_code(self):
         ofile = '/afs/inf.ed.ac.uk/user/o/owatts/temp/concat_test.wav'
         print 'concatenate the start of the training data, output here: %s'%(ofile)
@@ -181,7 +232,7 @@ class Synthesiser(object):
 
     def synth_from_config(self, inspect_join_weights_only=False):
 
-        print 'synth_from_config'
+        self.report('synth_from_config')
 
         first_stream = self.stream_list_target[0]
         test_flist = sorted(glob.glob(self.test_data_target_dirs[first_stream] + '/*.' + first_stream))
@@ -206,25 +257,163 @@ class Synthesiser(object):
         if ntest == 0:
             print 'No test files found based on configured test_data_dir and test_pattern'
         else:
-            print 'synthesising %s utternances based on config'%(ntest)
+            self.report('synthesising %s utternances based on config'%(ntest))
+
+
+        if self.mode_of_operation == 'stream_weight_balancing':
+            all_tscores = []
+            all_jscores = []
+
 
         all_distances = []
         for fname in test_flist:
-            if inspect_join_weights_only:
-                all_distances.append(self.inspect_join_weights_on_utt(fname))
-                print 'single utt -- break'
-                break 
-            else:
+            # if inspect_join_weights_only:
+            #     all_distances.append(self.inspect_join_weights_on_utt(fname))
+            #     # print 'single utt -- break'
+            #     # break 
+            # else:
+            if self.mode_of_operation == 'stream_weight_balancing':
+                tscores, jscores = self.synth_utt(fname)    
+                all_tscores.append(tscores)
+                all_jscores.append(jscores)
+            else:    
                 self.synth_utt(fname)    
 
+        if self.mode_of_operation == 'stream_weight_balancing':
+            all_tscores = np.vstack(all_tscores)
+            all_jscores = np.vstack(all_jscores)
 
+            mean_tscores = np.mean(all_tscores, axis=0)
+            mean_jscores = np.mean(all_jscores, axis=0)
+
+            # self.report( '------------- join and target cost summaries by stream -----------')
+            # self.report('')
+
+            # for (stream, mu) in zip (self.stream_list_join, mean_jscores ):
+            #     self.report( 'join   %s -- mean: %s   '%(stream.ljust(10), mu))
+            # self.report('')
+            # for (stream, mu) in zip (self.stream_list_target, mean_tscores ):
+            #     self.report( 'target %s -- mean: %s   '%(stream.ljust(10), mu))
+            # self.report('')
+            # self.report( '--------------------------------------------------------------------')
+
+
+            print( '------------- join and target cost summaries by stream -----------')
+            print('')
+
+            for (stream, mu) in zip (self.stream_list_join, mean_jscores ):
+                print( 'join   %s -- mean: %s   '%(stream.ljust(10), mu))
+            print('')
+            for (stream, mu) in zip (self.stream_list_target, mean_tscores ):
+                print( 'target %s -- mean: %s   '%(stream.ljust(10), mu))
+            print('')
+            print( '--------------------------------------------------------------------')
+
+
+
+            return (all_tscores.mean(axis=0), all_jscores.mean(axis=0))
+
+
+
+    def junk(self):
         if inspect_join_weights_only:
+            # import scipy
             all_distances = np.vstack(all_distances)
-            m,n = all_distances.shape
-            for stream in range(n):
-                pylab.hist(all_distances[:,stream], bins=30, alpha=0.7)
-            pylab.show()
 
+            ## this is per coeff square error terms; now split into streams:
+            start = 0
+            distance_by_stream = []
+            for stream_name in self.stream_list_join: 
+                stream_width = self.datadims_join[stream_name]
+                distance_by_stream.append(all_distances[:,start:start+stream_width])
+                start += stream_width
+            stream_sums = [stream_dist.sum() for stream_dist in distance_by_stream] ## sum over diff joins and over coeffs
+
+            print stream_sums
+            #sys.exit('stop here for now')
+
+
+            maxi = max(stream_sums)
+            #factors = [(maxi / stream_sum) / self.datadims_join[stream] for (stream, stream_sum) in zip(self.stream_list_join, stream_sums)]
+            factors = [(maxi / stream_sum) for (stream, stream_sum) in zip(self.stream_list_join, stream_sums)]
+
+
+            normed_distance_by_stream = [stream_vals * factor for (stream_vals, factor) in zip(distance_by_stream, factors)]
+            for thing in normed_distance_by_stream:
+                print thing.shape
+            normed_stream_sums = [stream_dist.sum() for stream_dist in normed_distance_by_stream]
+
+            print stream_sums
+            print factors
+            print normed_stream_sums
+
+
+            print 'stream weights'
+            print np.sqrt(np.array(factors))
+
+            summed_normed_distance_by_stream = [stream_vals.sum(axis=1).reshape((-1,1)) for stream_vals in normed_distance_by_stream]
+            print [t.shape for t in summed_normed_distance_by_stream]
+            summed_normed_distance_by_stream = np.hstack(summed_normed_distance_by_stream)
+            m,n = summed_normed_distance_by_stream.shape
+            ## make shared bins for all superimposed histogram plots:
+            nbins = 100
+            (mini, maxi) = (summed_normed_distance_by_stream.min(), summed_normed_distance_by_stream.max())
+            binwidth = (maxi-mini) / nbins
+            bins = np.arange(mini, maxi + binwidth, binwidth)
+            for stream in range(n):
+                pylab.hist(summed_normed_distance_by_stream[:,stream], bins=bins, alpha=0.3) # , label=self.stream_list_join[stream])
+            pylab.legend()
+            pylab.show()
+            print summed_normed_distance_by_stream.sum(axis=0) # [ 194773.71157401   93592.93011832  175219.98631917]
+
+
+
+
+            sys.exit('---5555----')
+            #all_distances *= np.array([ 1.  ,        2.08107291 , 1.11159529])
+
+
+            # diffs = all_distances[:,0] - all_distances[:,1]
+            # pylab.hist(diffs)
+            # pylab.show()
+            # print scipy.stats.wilcoxon(diffs)
+            # sys.exit('wesv')
+
+
+            m,n = all_distances.shape
+            ## make shared bins for all superimposed histogram plots:
+            nbins = 100
+            (mini, maxi) = (all_distances.min(), all_distances.max())
+            binwidth = (maxi-mini) / nbins
+            bins = np.arange(mini, maxi + binwidth, binwidth)
+            for stream in range(n):
+                pylab.hist(all_distances[:,stream], bins=bins, alpha=0.3) # , label=self.stream_list_join[stream])
+            pylab.legend()
+            pylab.show()
+            print all_distances.sum(axis=0) # [ 194773.71157401   93592.93011832  175219.98631917]
+
+
+
+    '''
+import numpy as np
+sums = np.array([ 13811.11409336 , 78233.73970166 , 11202.56575783])
+maxi = sums.max()
+factors = maxi / sums
+nrmed = sums * factors
+print nrmed
+print factors
+
+
+def get_facts(vals):
+    import numpy as np
+    sums = np.array(vals)
+    maxi = sums.max()
+    factors = maxi / sums
+    nrmed = sums * factors
+    print nrmed
+    print factors
+
+    '''
 
 
     def make_synthesis_condition_name(self):
@@ -252,7 +441,7 @@ class Synthesiser(object):
         safe_makedir(synth_dir)
             
         junk,base = os.path.split(fname)
-        print '               ==== SYNTHESISE %s ===='%(base)
+        self.report('               ==== SYNTHESISE %s ===='%(base))
         base = base.replace('.mgc','')
         outstem = os.path.join(synth_dir, base)       
 
@@ -312,9 +501,13 @@ class Synthesiser(object):
                     if len(current_candidates) == self.config['n_candidates']:
                         break
                 if len(current_candidates) == 0:
-                    sys.exit('no cands in training data to match %s! TODO: add backoff...'%(quinphone))
+                    print 'Warning: no cands in training data to match %s! Use v naive backoff to silence...'%(quinphone)
+                    current_candidates = [self.first_silent_unit]
+                    ## TODO: better backoff
+                    #sys.exit('no cands in training data to match %s! TODO: add backoff...'%(quinphone))
+
                 if len(current_candidates) != self.config['n_candidates']:
-                    print 'W',
+                    # 'W', TODO -- warning
                     #print 'Warning: only %s candidates for %s (%s)' % (len(current_candidates), quinphone, current_candidates)
                     difference = self.config['n_candidates'] - len(current_candidates) 
                     current_candidates += [-1]*difference
@@ -353,7 +546,6 @@ class Synthesiser(object):
 
 
 
-
         #start_time = start_clock('Make join FST with distances...')
         if False: # self.precomputed_joincost:
             print 'FORCE: Use existing join cost loaded from %s'%(self.join_cost_file)
@@ -361,7 +553,8 @@ class Synthesiser(object):
             self.join_cost_file = '/tmp/join.fst'  ## TODO: don't rely on /tmp/ !           
             ## TODO: WRAPFST  
 
-            self.make_on_the_fly_join_lattice(candidates, self.join_cost_file)
+            # self.make_on_the_fly_join_lattice(candidates, self.join_cost_file)
+            self.make_on_the_fly_join_lattice_BLOCK(candidates, self.join_cost_file) ## much faster -- always use this one
 
 
             t = start_clock('    COMPILE')
@@ -374,7 +567,6 @@ class Synthesiser(object):
         #stop_clock(start_time)          
 
     
-
 
 
 
@@ -399,60 +591,187 @@ class Synthesiser(object):
         stop_clock(start_time)          
 
 
-        # print 'got shortest path:'
-        # print best_path
+        self.report( 'got shortest path:')
+        self.report( best_path)
         # print len(best_path)
         # for i in best_path:
         #     print self.train_unit_names[i]
 
 
 
+        if self.mode_of_operation == 'stream_weight_balancing':
+            self.report('' )
+            self.report( 'balancing stream weights -- skip making waveform')
+            self.report('' )
+        else:
+            start_time = start_clock('Extract and join units')
+            self.concatenate(best_path, outstem + '.wav')    
+            stop_clock(start_time)          
+            self.report( 'Output wave: %s.wav'%(outstem ))
+            self.report('')
+            self.report('')
 
-        start_time = start_clock('Extract and join units')
-        self.concatenate(best_path, outstem + '.wav')    
-        stop_clock(start_time)          
+
+        if self.mode_of_operation == 'stream_weight_balancing':
+            tscores = self.get_target_scores_per_stream(target_features, best_path)
+            jscores = self.get_join_scores_per_stream(best_path)
+            return (tscores, jscores)
 
 
-        print 'Output wave: %s.wav'%(outstem )
-        print 
-        print 
 
-        output = []
         if self.config['get_selection_info']:
-            for (a,b) in zip(best_path[:-1], best_path[1:]):                
-                output.append(extract_monophone(self.train_unit_names[a]))
-                if b != a+1:
-                    output.append('|')
-            output.append(extract_monophone(self.train_unit_names[best_path[-1]]))
-            print ' '.join(output)
-            print
-            n_joins = output.count('|')
-            percent_joins = (float(n_joins) / (len(best_path)-1)) * 100
-            print '%.1f%% of junctures (%s) are joins'%(percent_joins, n_joins)
+
+            self.get_path_information(target_features, best_path)
+
+    def report(self, msg):
+        if self.verbose:
+            print msg
+
+    def get_target_scores_per_stream(self, target_features, best_path):
+        chosen_features = self.train_unit_features[best_path]
+        dists = np.sqrt(np.sum(((chosen_features - target_features)**2), axis=1))
+        sq_errs = (chosen_features - target_features)**2
+        stream_errors_target = self.aggregate_squared_errors_by_stream(sq_errs, 'target')
+        return stream_errors_target
+
+    def get_join_scores_per_stream(self, best_path):
+        sq_diffs_join = (self.unit_end_data[best_path[:-1],:] - self.unit_start_data[best_path[1:],:])**2
+        stream_errors_join = self.aggregate_squared_errors_by_stream(sq_diffs_join, 'join')
+        return stream_errors_join
 
 
-            print 
-            print ' --- Version with unit indexes ---'
-            print 
-            for (a,b) in zip(best_path[:-1], best_path[1:]):
-                output.append( extract_monophone(self.train_unit_names[a]) + '-' + str(a))
-                if b != a+1:
-                    output.append('|')
 
-            output.append('\n\n\n')
-            output.append(extract_monophone(self.train_unit_names[best_path[-1]]) + '-' + str(best_path[-1]))
-            print ' '.join(output)            
+    def get_path_information(self, target_features, best_path):
+        '''
+        Print out some information about what was selected, where the joins are, what the costs
+        were, etc. etc.
+        '''
 
-            print
-            print 'target scores'
-            
-            chosen_features = self.train_unit_features[best_path]
-            dists = np.sqrt(np.sum(((candidate_features - target_features)**2), axis=1))
-            mean_dists = np.mean(distances, axis=1)
-            std_dists = np.std(distances, axis=1)
-            print zip(dists, mean_dists, std_dists)
+        print '============'
+        print 'Display some information about the chosen path -- turn this off with config setting get_selection_info'
+        print 
+        output = []
+        for (a,b) in zip(best_path[:-1], best_path[1:]):                
+            output.append(extract_monophone(self.train_unit_names[a]))
+            if b != a+1:
+                output.append('|')
+        output.append(extract_monophone(self.train_unit_names[best_path[-1]]))
+        print ' '.join(output)
+        print
+        n_joins = output.count('|')
+        percent_joins = (float(n_joins) / (len(best_path)-1)) * 100
+        print '%.1f%% of junctures (%s) are joins'%(percent_joins, n_joins)
 
 
+        print 
+        print ' --- Version with unit indexes ---'
+        print 
+        for (a,b) in zip(best_path[:-1], best_path[1:]):
+            output.append( extract_monophone(self.train_unit_names[a]) + '-' + str(a))
+            if b != a+1:
+                output.append('|')
+
+        output.append('\n\n\n')
+        output.append(extract_monophone(self.train_unit_names[best_path[-1]]) + '-' + str(best_path[-1]))
+        print ' '.join(output)            
+
+        # print
+        # print 'target scores'
+        
+        stream_errors_target =  self.get_target_scores_per_stream(target_features, best_path)
+
+        # print stream_errors_target
+
+        # print dists
+        #mean_dists = np.mean(dists)
+        #std_dists = np.std(dists)
+        # print dists
+        # print (mean_dists, std_dists)
+
+        # print 
+        # print 'join scores'
+
+        stream_errors_join = self.get_join_scores_per_stream(best_path)
+
+        # print stream_errors_join
+
+        print 
+        print '------------- join and target cost summaries by stream -----------'
+        print
+
+        for (stream, mu, sig) in zip (self.stream_list_join,
+            np.mean(stream_errors_join, axis=0),
+            np.std(stream_errors_join, axis=0) ):
+            print 'join   %s -- mean: %s   std:  %s'%(stream.ljust(10), str(mu).ljust(15), str(sig).ljust(1))
+        print 
+        for (stream, mu, sig) in zip (self.stream_list_target,
+            np.mean(stream_errors_target, axis=0),
+            np.std(stream_errors_target, axis=0) ):
+            print 'target %s -- mean: %s   std:  %s'%(stream.ljust(10), str(mu).ljust(15), str(sig).ljust(1))
+        print 
+        print '--------------------------------------------------------------------'
+
+        print 'Skip plots for now and return'
+        return
+
+        ## plot scores per unit 
+         
+        ##### TARGET ONLY         
+        # units = [extract_monophone(self.train_unit_names[a]) for a in best_path]
+        # y_pos = np.arange(len(units))
+        # combined_t_cost = np.sum(stream_errors_target, axis=1)
+        # nstream = len(self.stream_list_target)
+        # print self.stream_list_target
+        # for (i,stream) in enumerate(self.stream_list_target):
+        #     plt.subplot('%s%s%s'%((nstream+1, 1, i+1)))
+        #     plt.bar(y_pos, stream_errors_target[:,i], align='center', alpha=0.5)
+        #     plt.xticks(y_pos, ['']*len(units))
+        #     plt.ylabel(stream)
+        # plt.subplot('%s%s%s'%(nstream+1, 1, nstream+1))
+        # plt.bar(y_pos, combined_t_cost, align='center', alpha=0.5)
+        # plt.xticks(y_pos, units)
+        # plt.ylabel('combined')
+
+
+        ## TARGWET AND JOIN
+        units = [extract_monophone(self.train_unit_names[a]) for a in best_path]
+        y_pos = np.arange(len(units))
+        combined_t_cost = np.sum(stream_errors_target, axis=1)
+        nstream = len(self.stream_list_target) + len(self.stream_list_join)
+        i = 0
+        i_graphic = 1
+        for stream in self.stream_list_target:
+            #print stream
+            plt.subplot('%s%s%s'%((nstream+2, 1, i_graphic)))
+            plt.bar(y_pos, stream_errors_target[:,i], align='center', alpha=0.5)
+            plt.xticks(y_pos, ['']*len(units))
+            plt.ylabel(stream)
+            i += 1
+            i_graphic += 1
+        plt.subplot('%s%s%s'%(nstream+2, 1, i_graphic))
+        plt.bar(y_pos, combined_t_cost, align='center', alpha=0.5)
+        plt.xticks(y_pos, units)
+        plt.ylabel('combined')         
+        i_graphic += 1
+        i = 0  ## reset for join streams
+
+        combined_j_cost = np.sum(stream_errors_join, axis=1)
+        y_pos_join = y_pos[:-1] + 0.5
+        for stream in self.stream_list_join:
+            print stream
+            plt.subplot('%s%s%s'%((nstream+2, 1, i_graphic)))
+            plt.bar(y_pos_join, stream_errors_join[:,i], align='center', alpha=0.5)
+            plt.xticks(y_pos_join, ['']*len(units))
+            plt.ylabel(stream)
+            i += 1
+            i_graphic += 1
+        plt.subplot('%s%s%s'%(nstream+2, 1, i_graphic))
+        plt.bar(y_pos_join, combined_j_cost, align='center', alpha=0.5)
+        plt.xticks(y_pos, units)
+        plt.ylabel('combined')            
+
+
+        plt.show()        
 
 
     def inspect_join_weights_on_utt(self, fname):
@@ -473,7 +792,7 @@ class Synthesiser(object):
         #outstem = os.path.join(synth_dir, base)       
 
         # start_time = start_clock('Get speech ')
-        speech = compose_speech(self.config['test_data_dir'], base, self.stream_list_target, \
+        speech = compose_speech(self.test_data_target_dirs, base, self.stream_list_target, \
                                 self.config['datadims_target']) 
 
         # m,dim = speech.shape
@@ -517,7 +836,7 @@ class Synthesiser(object):
 
 
         ##### self.config['preselection_method'] == 'quinphone':
-        self.config['n_candidates'] = 100 ### large number
+        #self.config['n_candidates'] = 100 ### large number
         start_time = start_clock('Preselect units (quinphone criterion) ')
         candidates = []
         for quinphone in unit_names:
@@ -677,6 +996,19 @@ class Synthesiser(object):
         return distance
 
 
+
+    def get_natural_distance_vectorised(self, first, second, order=2):
+        '''
+        first and second: indices of left and right units to be joined
+        order: number of frames of overlap
+        '''
+        sq_diffs = (self.unit_end_data[first,:] - self.unit_start_data[second,:])**2
+        ## already weighted, skip next line:
+        #sq_diffs *= self.join_weight_vector
+        distance = (1.0 / order) * np.sqrt(np.sum(sq_diffs, axis=1))   
+        return distance
+
+
     def get_natural_distance_by_stream(self, first, second, order=2):
         '''
         first and second: indices of left and right units to be joined
@@ -687,12 +1019,51 @@ class Synthesiser(object):
         #sq_diffs *= self.join_weight_vector
         start = 0
         distance_by_stream = []
-        for (stream_width, stream_name) in [(1,'energy'),(12,'mfcc')]:
+        for stream_name in self.stream_list_join:  #  [(1,'energy'),(12,'mfcc')]:
+            stream_width = self.datadims_join[stream_name]
             distance_by_stream.append((1.0 / order) * math.sqrt(np.sum(sq_diffs[start:start+stream_width])) )
+
+        # for (stream_width, stream_name) in [(1,'energy'),(12,'mfcc')]:
+        #     distance_by_stream.append((1.0 / order) * math.sqrt(np.sum(sq_diffs[start:start+stream_width])) )
             start += stream_width
 
         distance = (1.0 / order) * math.sqrt(np.sum(sq_diffs))   
-        return (distance, distance_by_stream)
+        #return (distance, distance_by_stream)
+        return (distance, np.sqrt(sq_diffs))  ### experikent by per coeff
+
+
+    def aggregate_squared_errors_by_stream(self, squared_errors, cost_type):
+        '''
+        NB: do not take sqrt!
+        '''
+
+        if cost_type == 'target':
+            streams = self.stream_list_target
+            stream_widths = self.datadims_target
+        elif cost_type == 'join':
+            streams = self.stream_list_join
+            stream_widths = self.datadims_join
+        else:
+            sys.exit('cost type must be one of {target, join}')
+
+        nstream = len(streams)
+        
+        m,n = squared_errors.shape
+        stream_distances = np.ones((m,nstream)) * -1.0
+
+        # print squared_errors.shape
+        # print stream_distances.shape
+        # print '----'
+
+        start = 0
+        for (i, stream) in enumerate(streams): 
+            stream_width = stream_widths[stream]
+            #stream_distances[:,i] = np.sqrt(np.sum(squared_errors[:, start:start+stream_width], axis=1)) 
+            stream_distances[:,i] = np.sum(squared_errors[:, start:start+stream_width], axis=1)
+            start += stream_width
+        return stream_distances
+
+
 
 
     def make_on_the_fly_join_lattice(self, ind, outfile, join_cost_weight=1.0, by_stream=False):
@@ -744,12 +1115,12 @@ class Synthesiser(object):
                         cost_cache_by_stream[(first, second)] = weight_by_stream
                     elif  join_cost_type == 'pitch_sync':
                         weight = self.get_natural_distance(first, second, order=1)
-
-
                     else:
                         sys.exit('Unknown join cost type: %s'%(join_cost_type))
 
                     weight *= self.config['join_cost_weight']
+
+
                     if forbid_repetition:
                         if first == second:
                             weight = VERY_BIG_WEIGHT_VALUE
@@ -774,6 +1145,109 @@ class Synthesiser(object):
 
         if by_stream:
             return cost_cache_by_stream
+
+
+
+
+    def make_on_the_fly_join_lattice_BLOCK(self, ind, outfile, join_cost_weight=1.0, by_stream=False):
+
+        '''
+        Get distances in blocks, not singly
+        '''
+
+        ## These are irrelevant when using halfphones -- suppress them:
+        forbid_repetition = False # self.config['forbid_repetition']
+        forbid_regression = False # self.config['forbid_regression']
+
+        ## For now, force join cost to be natural2
+        join_cost_type = self.config['join_cost_type']
+        join_cost_type = 'pitch_sync'
+        assert join_cost_type in ['pitch_sync']
+
+        start = 0
+        frames, cands = np.shape(ind)
+    
+        data_frames, dim = self.unit_end_data.shape
+        
+        ## cache costs for joins which could be used in an utterance.
+        ## This can save  computing things twice, 52 seconds -> 33 (335 frames, 50 candidates) 
+        ## (Probably no saving with half phones?)
+        cost_cache = {} 
+        
+        cost_cache_by_stream = {}
+
+        ## set limits to not go out of range -- unnecessary given new unit_end_data and unit_start_data?
+        if join_cost_type == 'pitch_sync':
+            mini = 1 
+            maxi = data_frames - 1              
+        else:
+            sys.exit('dvsdvsedv098987897')
+        
+        first_list = []
+        second_list = []
+        t = start_clock('     COST LIST')
+        for i in range(frames-1): 
+            for first in ind[i,:]:
+                if first < mini or first >= maxi:
+                    continue
+                for second in ind[i+1,:]:
+                    if second < mini or second >= maxi:
+                        continue
+                    #print (first, second)
+                    if (first == -1) or (second == -1):
+                        continue
+                    if (first, second) in cost_cache:
+                        continue
+                    
+                    # if  join_cost_type == 'pitch_sync' and by_stream:
+                    #     weight, weight_by_stream = self.get_natural_distance_by_stream(first, second, order=1)
+                    #     cost_cache_by_stream[(first, second)] = weight_by_stream
+                    # elif  join_cost_type == 'pitch_sync':
+                    #     weight = self.get_natural_distance(first, second, order=1)
+                    # else:
+                    #     sys.exit('Unknown join cost type: %s'%(join_cost_type))
+                    # weight *= self.config['join_cost_weight']
+
+
+                    if forbid_repetition:
+                        if first == second:
+                            weight = VERY_BIG_WEIGHT_VALUE
+                    if forbid_regression > 0:
+                        if (first - second) in range(forbid_regression+1):
+                            weight = VERY_BIG_WEIGHT_VALUE
+                    #cost_cache[(first, second)] = weight
+                    first_list.append(first)
+                    second_list.append(second)
+        stop_clock(t)
+
+
+
+        t = start_clock('     DISTS')
+        dists = self.get_natural_distance_vectorised(first_list, second_list, order=1)
+        #print dists
+        stop_clock(t)
+
+        t = start_clock('     make cost cache')
+        cost_cache = dict([((l,r), weight) for (l,r,weight) in zip(first_list, second_list, dists)])
+        stop_clock(t)
+
+
+    
+        t = start_clock('      WRITE')
+        ## 2nd pass: write it to file
+        if False: ## VIZ: show join histogram
+            print len(cost_cache)
+            pylab.hist([v for v in cost_cache.values() if v < VERY_BIG_WEIGHT_VALUE], bins=60)
+            pylab.show()
+        ### pruning:--
+        #cost_cache = dict([(k,v) for (k,v) in cost_cache.items() if v < 3000.0])
+        cost_cache_to_text_fst(cost_cache, outfile, join_cost_weight=join_cost_weight)
+        stop_clock(t)
+
+        if by_stream:
+            return cost_cache_by_stream
+
+
 
 
     def make_on_the_fly_join_lattice_PDIST(self, ind, outfile, join_cost_weight=1.0):
@@ -943,7 +1417,7 @@ if __name__ == '__main__':
     synth = Synthesiser(opts.config_fname)
     #synth.test_concatenation_code()
     
-    synth.synth_from_config()
+    #synth.synth_from_config()
 
-    #synth.synth_from_config(inspect_join_weights_only=True)
+    synth.synth_from_config(inspect_join_weights_only=False)
 

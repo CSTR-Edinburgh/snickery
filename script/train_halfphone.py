@@ -481,7 +481,11 @@ def compose_speech(feat_dir_dict, base, stream_list, datadims):
             vuv = np.ones(stream_data.shape)
             vuv[uv_ix, :] = 0.0
             ## set F0 to utterance's voiced frame mean in unvoiced frames:   
-            voiced_mean = stream_data[stream_data>0.0].mean()
+            voiced = stream_data[stream_data>0.0]
+            if voiced.size==0:
+                voiced_mean = 100.0 ### TODO: fix artibrary nnumber!
+            else:
+                voiced_mean = voiced.mean()
             stream_data[stream_data<=0.0] = voiced_mean 
             stream_data_list.append(stream_data)
             stream_data_list.append(vuv)

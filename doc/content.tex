@@ -1,0 +1,14 @@
+
+\section{Join cost}
+
+Join cost features are pitch synchronised. Each unit is characterised by 2 join vectors: one centred on the GCI upon which the unit starts, and one centred on the GCI on which it ends. Initial and final GCIs of units are determined such that the final GCI of unit $t$ in the database is the same as the initial GCI of the unit which naturally follows it in the database, at $t+1$.
+
+Join cost is Euclidean distance of relevant join vectors:
+
+\begin{equation}
+\sqrt{\sum_{i=1}^{n}(q_i - p_i)^{2}}
+\end{equation}
+
+Design of units means naturally adjacent units have 0 join cost, with no hack necessary.
+
+

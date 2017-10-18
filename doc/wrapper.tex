@@ -1,0 +1,76 @@
+\documentclass[a4paper,  12pt]{report} %% twoside to get odd/even headers different
+
+%twoside, 
+
+
+%%% uncomment this to use Author (year) citations -- e.g. plainnat
+%\usepackage[round]{natbib} %% round brackets *should* be default, but doesn't work out like that...
+
+
+%\usepackage{harvard}  %% clickable links
+
+\usepackage{epsfig,graphicx,amssymb,amsmath,epsfig,wasysym,color,multirow}
+\usepackage{verbatim}  %% for comment command
+\usepackage[lofdepth,lotdepth]{subfig}  %% for sub-figs
+\usepackage{rotating}    %% for sideways table and big sideways equation
+\usepackage[safe]{tipa}    %% for ipa symbols
+\usepackage{ucs}  %% for some romanian characters in chapter 8; see  http://blypt.blogspot.com/2011/07/romanian-diacritics-in-latex.html
+\usepackage{bm}  %% bold maths -- for eq.s in HMM section chapter 2
+
+\usepackage{floatrow} %% for captions by side of figure
+
+\usepackage{changebar}  %% to put change bars in margin
+%\setcounter{changebargrey}{0} % make bars black
+
+%\usepackage{titlepages}
+\usepackage{soul}
+
+\usepackage{enumitem}  %% This allows choosing bullets (or none), like: \begin{itemize}[label=]  
+
+\usepackage{fancyhdr}
+
+
+%% set grey for hl highlisght
+\usepackage{color}
+\definecolor{lightgray}{rgb}{.92,.92,.92}
+\sethlcolor{lightgray}
+
+\usepackage[draft]{hyperref}   % The breakurl depends on hyperref package -- "draft" measn
+                                % all hypertext options are turned off -- just want urls   breaks,
+                                      %% not links!
+\usepackage{breakurl}     %% \burl defined for breaking urls
+
+%\usepackage{floatflt}  %% flow text round figure -- word space tree size plot
+%\usepackage{wrapfig}  %% flow text round figure -- word space tree size plot
+
+%% http://timmurphy.org/2009/07/22/adjusting-latex-margins/
+\addtolength{\textwidth}{2cm}
+\addtolength{\hoffset}{-1cm}
+\addtolength{\textheight}{1cm}
+%\addtolength{\voffset}{-1cm}
+
+\begin{document}
+%%%-----------------------
+%%%-----------------------
+
+\input{content.tex}
+
+%%%-----------------------
+%%%-----------------------
+
+
+
+
+
+%\appendix
+%%\addcontentsline{toc}{chapter}{Appendix}
+%\addtocontents{toc}{\protect\contentsline{chapter}{Appendix:}{}}
+%\include{Timeline_chapter}
+%\bibliographystyle{unsrt}
+
+\bibliographystyle{abbrv}  %% was plain, then plainnat, then abbrvnat, then abbrvnat_OSW -- OSW hacked it to
+%%                                              not output e.g. URLS for books etc.
+\bibliography{./the_bibliography.bib}  %% was here before: /afs/inf.ed.ac.uk/user/s06/s0676515/bibliography/
+
+\end{document}
+
