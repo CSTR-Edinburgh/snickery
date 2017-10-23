@@ -145,7 +145,8 @@ Extract  data -- edit `script_data/data_config.txt` and, using 30 cores on CSTR 
 
 Note: initially, extraction and resampling were done with a single script. When using many cores on CSTR servers, the Python code for resampling really slowed things down. I separated the code until I have chance to debug this properly.
 
-As a final step, split MFCCs into energy and 12 others (this step should probably be merged into the other scripts):
+As a final step, split MFCCs into energy and 12 others. Also, check the data for some outlying values
+like -10000000000.0 and -5000000000.0 which make standardisation of the data crazy. Do this crudely by setting values outside the range [-100, 100] to 0. These steps should probably be merged into the other scripts):
 
 ```
  python ./script_data/split_mfccs.py /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data/pitch_sync/
