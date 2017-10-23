@@ -36,8 +36,8 @@ for mfcc_fname in sorted(glob.glob(mfcc_dir + '/*.mfcc')):
     speech = get_speech(mfcc_fname, 13)
 
     ## remove outlying values which make later standardisation of the data crazy:
-    speech[speech<-100.0] == 0.0
-    speech[speech>100.0] == 0.0
+    speech[speech<-100.0] = 0.0
+    speech[speech>100.0] = 0.0
     
     e = speech[:,0].reshape(-1,1)
     m = speech[:,1:]
