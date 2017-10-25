@@ -37,7 +37,7 @@ import pylab
 WRAPFST=True # True: used python bindings (pywrapfst) to OpenFST; False: use command line interface
 
 if WRAPFST:
-    from fst_functions_wrapped import compile_fst, make_target_sausage_lattice, cost_cache_to_text_fst, get_best_path_SIMP, compile_lm_fst, make_mapping_loop_fst, plot_fst, extract_path, compile_simple_lm_fst, sample_fst, make_sausage_lattice
+    from fst_functions_wrapped import compile_fst, make_target_sausage_lattice, cost_cache_to_text_fst, get_best_path_SIMP, compile_lm_fst, make_mapping_loop_fst, plot_fst, extract_path, compile_simple_lm_fst, sample_fst, make_sausage_lattice, cost_cache_to_compiled_fst
 else:
     from fst_functions import compile_fst, make_t_lattice_SIMP, cost_cache_to_text_fst, get_best_path_SIMP, compile_lm_fst, make_mapping_loop_fst
 
@@ -50,7 +50,7 @@ import matplotlib.pyplot as plt; plt.rcdefaults()
 import matplotlib.pyplot as plt
 
 
-verbose = True # False
+verbose =   False # True # False
 
 
 ## TODO_ verbosity level -- logging?
@@ -191,9 +191,9 @@ class Synthesiser(object):
         ## get from per-stream to per-coeff weights:
         join_weight_vector = []
         for (i,stream) in enumerate(self.stream_list_join):
-            if stream in const.vuv_stream_names:
-                join_weight_vector.extend([weights[i]]*2)
-            else:
+            # if stream in const.vuv_stream_names:
+            #     join_weight_vector.extend([weights[i]]*2)
+            # else:
                 join_weight_vector.extend([weights[i]]*self.datadims_join[stream])
         join_weight_vector = np.array(join_weight_vector)
         join_contexts_weighted = weight(self.join_contexts_unweighted, join_weight_vector)   
@@ -206,13 +206,13 @@ class Synthesiser(object):
         # print join_weight_vector
 
     def set_target_weights(self, weights):
-        assert len(weights) == len(self.stream_list_target)
+        assert len(weights) == len(self.stream_list_target), (weights, self.stream_list_target)
         ## get from per-stream to per-coeff weights:
         target_weight_vector = []
         for (i,stream) in enumerate(self.stream_list_target):
-            if stream in const.vuv_stream_names:
-                target_weight_vector.extend([weights[i]]*2)
-            else:
+            # if stream in const.vuv_stream_names:
+            #     target_weight_vector.extend([weights[i]]*2)
+            # else:
                 target_weight_vector.extend([weights[i]]*self.datadims_target[stream])
         target_weight_vector = np.array(target_weight_vector + target_weight_vector)    ### TODO: doubled!     
         self.train_unit_features = weight(self.train_unit_features_unweighted, target_weight_vector)   
@@ -229,10 +229,7 @@ class Synthesiser(object):
         self.concatenate(np.arange(100, 150), ofile)    
         
 
-
-    def synth_from_config(self, inspect_join_weights_only=False):
-
-        self.report('synth_from_config')
+    def get_test_sentences(self):
 
         first_stream = self.stream_list_target[0]
         test_flist = sorted(glob.glob(self.test_data_target_dirs[first_stream] + '/*.' + first_stream))
@@ -258,60 +255,72 @@ class Synthesiser(object):
             print 'No test files found based on configured test_data_dir and test_pattern'
         else:
             self.report('synthesising %s utternances based on config'%(ntest))
+        return test_flist
+
+    def synth_from_config(self, inspect_join_weights_only=False):
+
+        self.report('synth_from_config')
 
 
-        if self.mode_of_operation == 'stream_weight_balancing':
-            all_tscores = []
-            all_jscores = []
+        test_flist = self.get_test_sentences()
 
 
-        all_distances = []
+        # if self.mode_of_operation == 'stream_weight_balancing':
+        #     all_tscores = []
+        #     all_jscores = []
+
+
+        # all_distances = []
+
         for fname in test_flist:
             # if inspect_join_weights_only:
             #     all_distances.append(self.inspect_join_weights_on_utt(fname))
             #     # print 'single utt -- break'
             #     # break 
             # else:
-            if self.mode_of_operation == 'stream_weight_balancing':
-                tscores, jscores = self.synth_utt(fname)    
-                all_tscores.append(tscores)
-                all_jscores.append(jscores)
-            else:    
-                self.synth_utt(fname)    
 
-        if self.mode_of_operation == 'stream_weight_balancing':
-            all_tscores = np.vstack(all_tscores)
-            all_jscores = np.vstack(all_jscores)
-
-            mean_tscores = np.mean(all_tscores, axis=0)
-            mean_jscores = np.mean(all_jscores, axis=0)
-
-            # self.report( '------------- join and target cost summaries by stream -----------')
-            # self.report('')
-
-            # for (stream, mu) in zip (self.stream_list_join, mean_jscores ):
-            #     self.report( 'join   %s -- mean: %s   '%(stream.ljust(10), mu))
-            # self.report('')
-            # for (stream, mu) in zip (self.stream_list_target, mean_tscores ):
-            #     self.report( 'target %s -- mean: %s   '%(stream.ljust(10), mu))
-            # self.report('')
-            # self.report( '--------------------------------------------------------------------')
+            # if self.mode_of_operation == 'stream_weight_balancing':
+            #     tscores, jscores = self.synth_utt(fname)    
+            #     all_tscores.append(tscores)
+            #     all_jscores.append(jscores)
+            # else:    
 
 
-            print( '------------- join and target cost summaries by stream -----------')
-            print('')
+            self.synth_utt(fname)    
 
-            for (stream, mu) in zip (self.stream_list_join, mean_jscores ):
-                print( 'join   %s -- mean: %s   '%(stream.ljust(10), mu))
-            print('')
-            for (stream, mu) in zip (self.stream_list_target, mean_tscores ):
-                print( 'target %s -- mean: %s   '%(stream.ljust(10), mu))
-            print('')
-            print( '--------------------------------------------------------------------')
+        # if self.mode_of_operation == 'stream_weight_balancing':
+        #     all_tscores = np.vstack(all_tscores)
+        #     all_jscores = np.vstack(all_jscores)
+
+        #     mean_tscores = np.mean(all_tscores, axis=0)
+        #     mean_jscores = np.mean(all_jscores, axis=0)
+
+        #     # self.report( '------------- join and target cost summaries by stream -----------')
+        #     # self.report('')
+
+        #     # for (stream, mu) in zip (self.stream_list_join, mean_jscores ):
+        #     #     self.report( 'join   %s -- mean: %s   '%(stream.ljust(10), mu))
+        #     # self.report('')
+        #     # for (stream, mu) in zip (self.stream_list_target, mean_tscores ):
+        #     #     self.report( 'target %s -- mean: %s   '%(stream.ljust(10), mu))
+        #     # self.report('')
+        #     # self.report( '--------------------------------------------------------------------')
+
+        #     if verbose:
+        #         print( '------------- join and target cost summaries by stream -----------')
+        #         print('')
+
+        #         for (stream, mu) in zip (self.stream_list_join, mean_jscores ):
+        #             print( 'join   %s -- mean: %s   '%(stream.ljust(10), mu))
+        #         print('')
+        #         for (stream, mu) in zip (self.stream_list_target, mean_tscores ):
+        #             print( 'target %s -- mean: %s   '%(stream.ljust(10), mu))
+        #         print('')
+        #         print( '--------------------------------------------------------------------')
 
 
-
-            return (all_tscores.mean(axis=0), all_jscores.mean(axis=0))
+        #     return (all_tscores, all_jscores)
+        #     #return ((all_tscores.mean(axis=0), all_jscores.mean(axis=0)),  (all_tscores.std(axis=0), all_jscores.std(axis=0)))
 
 
 
@@ -420,8 +429,13 @@ def get_facts(vals):
         '''
         Return string encoding all variables which can be ... 
         '''
-        target_weights = vector_to_string(self.config['feature_weights_target'])
-        join_weights = vector_to_string(self.config['feature_weights_join'])
+        #### Previous version: compressed representtion of coeff per dimension
+        # target_weights = vector_to_string(self.config['feature_weights_target'])
+        # join_weights = vector_to_string(self.config['feature_weights_join'])
+
+        ##### Current version: weight per stream.
+        target_weights = '-'.join([str(val) for val in self.config['target_stream_weights']])
+        join_weights = '-'.join([str(val) for val in self.config['join_stream_weights']])
         name = 'target-%s_join-%s_scale-%s_presel-%s_jmetric-%s_cand-%s_taper-%s'%(
                     target_weights, join_weights, self.config['join_cost_weight'],
                     self.config['preselection_method'],
@@ -432,8 +446,231 @@ def get_facts(vals):
         return name
 
 
+    def __call__(self, fname):
+        '''
+        To enable parallelisation
+        '''
+        return self.synth_utt(fname)
 
-    def synth_utt(self, fname):
+
+    def synth_utts_bulk(self, fnames): 
+        '''
+        Share a single join lattice to save time---
+        '''
+        train_condition = make_train_condition_name(self.config)
+        synth_condition = self.make_synthesis_condition_name()
+        synth_dir = os.path.join(self.config['workdir'], 'synthesis', train_condition, synth_condition)
+        safe_makedir(synth_dir)
+        
+        candidates_per_utt = []
+        distances_per_utt = []
+        T_per_utt = []
+        target_features_per_utt = []
+
+        for fname in fnames:
+            junk,base = os.path.split(fname)
+            self.report('               ==== SYNTHESISE %s ===='%(base))
+            base = base.replace('.mgc','')
+            outstem = os.path.join(synth_dir, base)       
+
+            start_time = start_clock('Get speech ')
+            speech = compose_speech(self.test_data_target_dirs, base, self.stream_list_target, \
+                                    self.config['datadims_target']) 
+
+            m,dim = speech.shape
+
+            if (self.config['standardise_target_data'], True):                                
+                speech = standardise(speech, self.mean_vec_target, self.std_vec_target)         
+            
+            #fshift_seconds = (0.001 * self.config['frameshift_ms'])
+            #fshift = int(self.config['sample_rate'] * fshift_seconds)        
+
+            labfile = os.path.join(self.config['test_lab_dir'], base + '.' + self.config['lab_extension'])
+            labs = read_label(labfile, self.quinphone_regex)
+
+            if self.config.get('untrim_silence_target_speech', False):
+                speech = reinsert_terminal_silence(speech, labs)
+
+            if self.config.get('suppress_weird_festival_pauses', False):
+                labs = suppress_weird_festival_pauses(labs)
+
+            unit_names, unit_features, unit_timings = get_halfphone_stats(speech, labs)
+           
+            if self.config['weight_target_data']:                                
+                unit_features = weight(unit_features, self.target_weight_vector)       
+
+            #print unit_features
+            #print unit_names
+
+            n_units = len(unit_names)
+            stop_clock(start_time)
+
+
+            if self.config['preselection_method'] == 'acoustic':
+
+                start_time = start_clock('Acoustic select units ')
+                ## call has same syntax for sklearn and scipy KDTrees:--
+                distances, candidates = self.tree.query(unit_features, k=self.config['n_candidates'])
+                stop_clock(start_time) 
+
+            elif self.config['preselection_method'] == 'quinphone':
+
+                start_time = start_clock('Preselect units ')
+                #candidates = np.ones((n_units, self.config['n_candidates'])) * -1
+                candidates = []
+                for quinphone in unit_names:
+                    current_candidates = []
+                    mono, diphone, triphone, quinphone = break_quinphone(quinphone) 
+                    for form in [quinphone, triphone, diphone, mono]:
+                        for unit in self.unit_index.get(form, []):
+                            current_candidates.append(unit)
+                            if len(current_candidates) == self.config['n_candidates']:
+                                break
+                        if len(current_candidates) == self.config['n_candidates']:
+                            break
+                    if len(current_candidates) == 0:
+                        print 'Warning: no cands in training data to match %s! Use v naive backoff to silence...'%(quinphone)
+                        current_candidates = [self.first_silent_unit]
+                        ## TODO: better backoff
+                        #sys.exit('no cands in training data to match %s! TODO: add backoff...'%(quinphone))
+
+                    if len(current_candidates) != self.config['n_candidates']:
+                        # 'W', TODO -- warning
+                        #print 'Warning: only %s candidates for %s (%s)' % (len(current_candidates), quinphone, current_candidates)
+                        difference = self.config['n_candidates'] - len(current_candidates) 
+                        current_candidates += [-1]*difference
+                    candidates.append(current_candidates)
+                candidates = np.array(candidates)
+                stop_clock(start_time)          
+
+
+                start_time = start_clock('Compute target distances...')
+                zero_target_cost = False
+                if zero_target_cost:
+                    distances = np.ones(candidates.shape)
+                else:
+                    distances = []
+                    for (i,row) in enumerate(candidates):
+                        candidate_features = self.train_unit_features[row]
+                        target_features = unit_features[i].reshape((1,-1))
+                        dists = np.sqrt(np.sum(((candidate_features - target_features)**2), axis=1))
+                        distances.append(dists)
+                    distances = np.array(distances)
+                stop_clock(start_time)          
+           
+
+            else:
+                sys.exit('preselection_method unknown')
+
+
+        
+            start_time = start_clock('Make target FST')
+            if WRAPFST:
+                T = make_target_sausage_lattice(distances, candidates)        
+            else:
+                comm('rm -f /tmp/{target,join,comp,output}.*') ## TODO: don't rely on /tmp/ !
+                make_t_lattice_SIMP(distances, candidates, '/tmp/target.fst.txt')
+            stop_clock(start_time)          
+
+            distances_per_utt.append(distances)
+            candidates_per_utt.append(candidates)
+            target_features_per_utt.append(unit_features)
+            T_per_utt.append(T)
+
+
+        ## ==================
+        ### Make shared J lattice:
+
+
+        direct = True   ### compile J directly without writing to text? In fact doesn't save much time...
+
+        #start_time = start_clock('Make join FST with distances...')
+        if False: # self.precomputed_joincost:
+            print 'FORCE: Use existing join cost loaded from %s'%(self.join_cost_file)
+        else:
+            self.join_cost_file = '/tmp/join.fst'  ## TODO: don't rely on /tmp/ !           
+            ## TODO: WRAPFST  
+
+            # self.make_on_the_fly_join_lattice(candidates, self.join_cost_file)
+            if direct:
+
+                J = self.make_on_the_fly_join_lattice_BLOCK_DIRECT(candidates_per_utt, multiple_sentences=True)
+            else:
+                self.make_on_the_fly_join_lattice_BLOCK(candidates, self.join_cost_file, direct=False) ## much faster -- always use this one
+
+
+                t = start_clock('    COMPILE')
+                compile_fst(self.tool, self.join_cost_file, self.join_cost_file + '.bin')
+                stop_clock(t)
+
+
+        best_path_per_utt = []
+        for T in T_per_utt:
+            start_time = start_clock('Compose and find shortest path')  
+            if WRAPFST:
+                if True: # not self.precomputed_joincost:
+                    if not direct:
+                        J = openfst.Fst.read(self.join_cost_file + '.bin')
+                    #stop_clock(start_time)     
+                    #start_time = start_clock('Compose and find shortest path 2')     
+                    best_path = get_best_path_SIMP(T, J, \
+                                                    join_already_compiled=True, \
+                                                    add_path_of_last_resort=False)                        
+                else:
+                    J = self.J ## already loaded into memory
+                    best_path = get_best_path_SIMP(T, J, \
+                                                    join_already_compiled=True, \
+                                                    add_path_of_last_resort=True)        
+            else:
+                best_path = get_best_path_SIMP(self.tool, '/tmp/target.fst.txt', self.join_cost_file, \
+                                                join_already_compiled=self.precomputed_joincost, \
+                                                add_path_of_last_resort=True)
+
+            best_path_per_utt.append(best_path)
+            stop_clock(start_time)          
+
+
+            self.report( 'got shortest path:')
+            self.report( best_path)
+            # print len(best_path)
+            # for i in best_path:
+            #     print self.train_unit_names[i]
+
+
+
+        if self.mode_of_operation == 'stream_weight_balancing':
+            self.report('' )
+            self.report( 'balancing stream weights -- skip making waveform')
+            self.report('' )
+        else:
+            sys.exit('TODO: bulk synth for plain synthesis')
+            start_time = start_clock('Extract and join units')
+            self.concatenate(best_path, outstem + '.wav')    
+            stop_clock(start_time)          
+            self.report( 'Output wave: %s.wav'%(outstem ))
+            self.report('')
+            self.report('')
+
+
+        if self.mode_of_operation == 'stream_weight_balancing':
+            scores_per_utt = []
+            for (target_features, best_path) in zip(target_features_per_utt, best_path_per_utt):
+                tscores = self.get_target_scores_per_stream(target_features, best_path)
+                jscores = self.get_join_scores_per_stream(best_path)
+
+                print self.get_njoins(best_path)
+
+                scores_per_utt.append( (tscores, jscores) )
+            return scores_per_utt
+
+
+        if self.config['get_selection_info']:
+            sys.exit('TODO: bulk synth for plain synthesis 2')
+        #     self.get_path_information(target_features, best_path)
+
+
+
+    def synth_utt(self, fname): # , stream_weight_balancing=False):
 
         train_condition = make_train_condition_name(self.config)
         synth_condition = self.make_synthesis_condition_name()
@@ -544,7 +781,7 @@ def get_facts(vals):
             make_t_lattice_SIMP(distances, candidates, '/tmp/target.fst.txt')
         stop_clock(start_time)          
 
-
+        direct = True   ### compile J directly without writing to text? In fact doesn't save much time...
 
         #start_time = start_clock('Make join FST with distances...')
         if False: # self.precomputed_joincost:
@@ -554,12 +791,16 @@ def get_facts(vals):
             ## TODO: WRAPFST  
 
             # self.make_on_the_fly_join_lattice(candidates, self.join_cost_file)
-            self.make_on_the_fly_join_lattice_BLOCK(candidates, self.join_cost_file) ## much faster -- always use this one
+            if direct:
+
+                J = self.make_on_the_fly_join_lattice_BLOCK_DIRECT(candidates)
+            else:
+                self.make_on_the_fly_join_lattice_BLOCK(candidates, self.join_cost_file, direct=False) ## much faster -- always use this one
 
 
-            t = start_clock('    COMPILE')
-            compile_fst(self.tool, self.join_cost_file, self.join_cost_file + '.bin')
-            stop_clock(t)
+                t = start_clock('    COMPILE')
+                compile_fst(self.tool, self.join_cost_file, self.join_cost_file + '.bin')
+                stop_clock(t)
 
 
             #print 'sleep 1...'
@@ -573,9 +814,10 @@ def get_facts(vals):
         start_time = start_clock('Compose and find shortest path')  
         if WRAPFST:
             if True: # not self.precomputed_joincost:
-                J = openfst.Fst.read(self.join_cost_file + '.bin')
-                stop_clock(start_time)     
-                start_time = start_clock('Compose and find shortest path 2')     
+                if not direct:
+                    J = openfst.Fst.read(self.join_cost_file + '.bin')
+                #stop_clock(start_time)     
+                #start_time = start_clock('Compose and find shortest path 2')     
                 best_path = get_best_path_SIMP(T, J, \
                                                 join_already_compiled=True, \
                                                 add_path_of_last_resort=False)                        
@@ -615,6 +857,9 @@ def get_facts(vals):
         if self.mode_of_operation == 'stream_weight_balancing':
             tscores = self.get_target_scores_per_stream(target_features, best_path)
             jscores = self.get_join_scores_per_stream(best_path)
+
+            print self.get_njoins(best_path)
+
             return (tscores, jscores)
 
 
@@ -639,6 +884,16 @@ def get_facts(vals):
         stream_errors_join = self.aggregate_squared_errors_by_stream(sq_diffs_join, 'join')
         return stream_errors_join
 
+
+    def get_njoins(self, best_path):
+
+        njoins = 0
+        for (a,b) in zip(best_path[:-1], best_path[1:]):                
+            if b != a+1:
+                njoins += 1
+        percent_joins = (float(njoins) / (len(best_path)-1)) * 100
+        return (njoins, percent_joins)
+        #print '%.1f%% of junctures (%s) are joins'%(percent_joins, n_joins)
 
 
     def get_path_information(self, target_features, best_path):
@@ -710,6 +965,8 @@ def get_facts(vals):
             print 'target %s -- mean: %s   std:  %s'%(stream.ljust(10), str(mu).ljust(15), str(sig).ljust(1))
         print 
         print '--------------------------------------------------------------------'
+
+
 
         print 'Skip plots for now and return'
         return
@@ -1149,11 +1406,13 @@ def get_facts(vals):
 
 
 
-    def make_on_the_fly_join_lattice_BLOCK(self, ind, outfile, join_cost_weight=1.0, by_stream=False):
+    def make_on_the_fly_join_lattice_BLOCK(self, ind, outfile, join_cost_weight=1.0, by_stream=False, direct=False):
 
         '''
         Get distances in blocks, not singly
         '''
+
+        assert by_stream == False ## TODO: remove if unused
 
         ## These are irrelevant when using halfphones -- suppress them:
         forbid_repetition = False # self.config['forbid_repetition']
@@ -1233,19 +1492,144 @@ def get_facts(vals):
 
 
     
-        t = start_clock('      WRITE')
-        ## 2nd pass: write it to file
-        if False: ## VIZ: show join histogram
-            print len(cost_cache)
-            pylab.hist([v for v in cost_cache.values() if v < VERY_BIG_WEIGHT_VALUE], bins=60)
-            pylab.show()
-        ### pruning:--
-        #cost_cache = dict([(k,v) for (k,v) in cost_cache.items() if v < 3000.0])
-        cost_cache_to_text_fst(cost_cache, outfile, join_cost_weight=join_cost_weight)
+        
+        if direct:
+            t = start_clock('      WRITE compiled')
+            J = cost_cache_to_compiled_fst(cost_cache, join_cost_weight=join_cost_weight)
+        else:
+            t = start_clock('      WRITE txt')
+            ## 2nd pass: write it to file
+            if False: ## VIZ: show join histogram
+                print len(cost_cache)
+                pylab.hist([v for v in cost_cache.values() if v < VERY_BIG_WEIGHT_VALUE], bins=60)
+                pylab.show()
+            ### pruning:--
+            #cost_cache = dict([(k,v) for (k,v) in cost_cache.items() if v < 3000.0])
+            cost_cache_to_text_fst(cost_cache, outfile, join_cost_weight=join_cost_weight)
         stop_clock(t)
 
-        if by_stream:
-            return cost_cache_by_stream
+
+        if direct:
+            return J
+
+
+
+
+
+    def make_on_the_fly_join_lattice_BLOCK_DIRECT(self, ind, join_cost_weight=1.0, multiple_sentences=False):
+
+        '''
+        Get distances in blocks, not singly
+        '''
+        direct = True
+        #assert by_stream == False ## TODO: remove if unused
+
+        ## These are irrelevant when using halfphones -- suppress them:
+        forbid_repetition = False # self.config['forbid_repetition']
+        forbid_regression = False # self.config['forbid_regression']
+
+        ## For now, force join cost to be natural2
+        join_cost_type = self.config['join_cost_type']
+        join_cost_type = 'pitch_sync'
+        assert join_cost_type in ['pitch_sync']
+
+
+        data_frames, dim = self.unit_end_data.shape
+        
+        ## cache costs for joins which could be used in an utterance.
+        ## This can save  computing things twice, 52 seconds -> 33 (335 frames, 50 candidates) 
+        ## (Probably no saving with half phones?)
+        cost_cache = {} 
+        
+        cost_cache_by_stream = {}
+
+        ## set limits to not go out of range -- unnecessary given new unit_end_data and unit_start_data?
+        if join_cost_type == 'pitch_sync':
+            mini = 1 
+            maxi = data_frames - 1              
+        else:
+            sys.exit('dvsdvsedv098987897')
+        
+        ###start = 0
+        if not multiple_sentences:
+            inds = [ind]
+        else:
+            inds = ind
+
+
+        first_list = []
+        second_list = []
+
+        t = start_clock('     COST LIST')
+
+        for ind in inds:
+            frames, cands = np.shape(ind)
+
+            for i in range(frames-1): 
+                for first in ind[i,:]:
+                    if first < mini or first >= maxi:
+                        continue
+                    for second in ind[i+1,:]:
+                        if second < mini or second >= maxi:
+                            continue
+                        #print (first, second)
+                        if (first == -1) or (second == -1):
+                            continue
+                        if (first, second) in cost_cache:
+                            continue
+                        
+                        # if  join_cost_type == 'pitch_sync' and by_stream:
+                        #     weight, weight_by_stream = self.get_natural_distance_by_stream(first, second, order=1)
+                        #     cost_cache_by_stream[(first, second)] = weight_by_stream
+                        # elif  join_cost_type == 'pitch_sync':
+                        #     weight = self.get_natural_distance(first, second, order=1)
+                        # else:
+                        #     sys.exit('Unknown join cost type: %s'%(join_cost_type))
+                        # weight *= self.config['join_cost_weight']
+
+
+                        if forbid_repetition:
+                            if first == second:
+                                weight = VERY_BIG_WEIGHT_VALUE
+                        if forbid_regression > 0:
+                            if (first - second) in range(forbid_regression+1):
+                                weight = VERY_BIG_WEIGHT_VALUE
+                        #cost_cache[(first, second)] = weight
+                        first_list.append(first)
+                        second_list.append(second)
+        stop_clock(t)
+
+
+
+        t = start_clock('     DISTS')
+        dists = self.get_natural_distance_vectorised(first_list, second_list, order=1)
+        #print dists
+        stop_clock(t)
+
+        t = start_clock('     make cost cache')
+        cost_cache = dict([((l,r), weight) for (l,r,weight) in zip(first_list, second_list, dists)])
+        stop_clock(t)
+
+
+    
+        t = start_clock('      WRITE')
+        if direct:
+            J = cost_cache_to_compiled_fst(cost_cache, join_cost_weight=join_cost_weight)
+        else:
+            ## 2nd pass: write it to file
+            if False: ## VIZ: show join histogram
+                print len(cost_cache)
+                pylab.hist([v for v in cost_cache.values() if v < VERY_BIG_WEIGHT_VALUE], bins=60)
+                pylab.show()
+            ### pruning:--
+            #cost_cache = dict([(k,v) for (k,v) in cost_cache.items() if v < 3000.0])
+            cost_cache_to_text_fst(cost_cache, outfile, join_cost_weight=join_cost_weight)
+        stop_clock(t)
+
+
+        if direct:
+            return J
+
 
 
 

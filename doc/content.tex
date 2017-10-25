@@ -1,4 +1,10 @@
 
+\section{Standardisation}
+
+Streams of features for both the target and join costs are standardised as follows. Means are computed per coefficient so that the standardised values will all have zero mean, but a single std value is used to scale all coefficients in each stream. The motivation for this is that we assume stream features that we are using have been designed in such a way that the relative dynamic range of coeffs is proportional to their relative percpetual importance, and we wish to preserve these difference of range in the standardised values. Unvoiced frames of F0 are ignored when coputeing means and stds. Unvoiced values are also treated specally when streams are standardisd -- they are assigned a negative value whose magnitue is given by multiplying the F0 feature's std by a constant factor (20). The motivation here is ... (cf. Rob)
+
+
+
 \section{Join cost}
 
 Join cost features are pitch synchronised. Each unit is characterised by 2 join vectors: one centred on the GCI upon which the unit starts, and one centred on the GCI on which it ends. Initial and final GCIs of units are determined such that the final GCI of unit $t$ in the database is the same as the initial GCI of the unit which naturally follows it in the database, at $t+1$.
@@ -10,5 +16,22 @@ Join cost is Euclidean distance of relevant join vectors:
 \end{equation}
 
 Design of units means naturally adjacent units have 0 join cost, with no hack necessary.
+
+
+
+
+\section{Weight balancing}
+
+Our initial assumption when building a voice is that all streams within both the join and target subcosts
+should on average contribute equally to the selelction of units by that subcost; we also assume that 
+target cost and join cost should contribute equally to the total cost. 
+Contributions from streams are adjusted by directly weighting the coefficients of the streams (rather than
+e.g. sqaured difference terms in the error function) as described above.
+Choosing stream weights so that the streams contribute in this balanced way is not trivial, as the problem
+is circular: given the results of some search, we can compute the contribution of stream costs to the
+total path cost, and the necessary scaling to balance their contribution, but the search must itself be based on an initial weighting. (Alternative approaches -- such as considering all candidate paths through a search lattice equally likely -- might lead to a simpler solution, but this solution will consider possibly extremely bad paths.) We therefore use an iterative approach to setting the weights, as follows:
+
+...
+
 
 

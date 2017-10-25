@@ -23,7 +23,8 @@ import numpy as np
 from segmentaxis import segment_axis
 from speech_manip import get_speech
 from label_manip import extract_quinphone
-from util import splice_data, unsplice, safe_makedir
+from util import splice_data, unsplice, safe_makedir, readlist
+import const
 from const import label_delimiter, vuv_stream_names, label_length_diff_tolerance
 
 
@@ -86,11 +87,12 @@ def main_work(config, overwrite_existing_data=False):
     #     stream_dir = os.path.join(join_feat_dir, stream)
     #     assert os.path.isdir(stream_dir), 'Directory %s not accessible'%(stream_dir)
     
-    ## work out initial list of training utterances based on files present in first stream subdir: 
+    ## First, work out initial list of training utterances based on files present in first stream subdir: 
     first_stream = stream_list_target[0] ## <-- typically, mgc
     utt_list = sorted(glob.glob(target_stream_dirs[first_stream] +'/*.' + first_stream))
     flist = [os.path.split(fname)[-1].replace('.'+first_stream,'') for fname in utt_list]
     
+    ## Next, limit training utterances by number or by pattern:
     if type(n_train_utts) == int:
         if (n_train_utts == 0 or n_train_utts > len(flist)):
             n_train_utts = len(flist)
@@ -100,13 +102,21 @@ def main_work(config, overwrite_existing_data=False):
         flist = [name for name in flist if match_expression in name]
         print 'Selected %s utts with pattern %s'%(len(flist), match_expression)
         
-    ## also filter for test material, in case they are in same directory:
+    ## Also filter for test material, in case they are in same directory:
     test_flist = []
     for fname in test_flist:
-        for pattern in self.config['test_patterns']:
+        for pattern in config['test_patterns']:
             if pattern in fname:
                 test_flist.append(fname)
     flist = [name for name in flist if name not in test_flist]
+
+    ## Finally, only take utterances which occur in train_list, if it is given in config:
+    if 'train_list' in config:
+        assert os.path.isfile(config['train_list'])
+        train_list = readlist(config['train_list'])
+        train_list = dict(zip(train_list, train_list))
+        flist = [name for name in flist if name in train_list]
+
 
     assert len(flist) > 0    
 
@@ -114,6 +124,7 @@ def main_work(config, overwrite_existing_data=False):
     ## 1A) First pass: get mean and std per stream for each of {target,join}
     (mean_vec_target, std_vec_target) = get_mean_std(target_stream_dirs, stream_list_target, datadims_target, flist)
     (mean_vec_join, std_vec_join) = get_mean_std(join_stream_dirs, stream_list_join, datadims_join, flist)
+
 
 
 
@@ -177,6 +188,8 @@ def main_work(config, overwrite_existing_data=False):
     ## Standardise data (within streams), compose, add VUV, fill F0 gaps with utterance mean voiced value: 
     start = 0
 
+
+
     print 'Composing ....'
     print flist
     new_flist = []
@@ -209,9 +222,18 @@ def main_work(config, overwrite_existing_data=False):
         j_speech = compose_speech(join_stream_dirs, base, stream_list_join, datadims_join)
         print j_speech.shape
         if j_speech.size == 1:  ## bad return value  
-            continue                    
+            continue 
+        # print '-------a'  
+        # print j_speech      
+        # print np.mean(j_speech, axis=0).tolist()
+        # print np.std(j_speech, axis=0).tolist()                    
         if config['standardise_join_data']:
-            j_speech = standardise(j_speech, mean_vec_join, std_vec_join)                        
+            j_speech = standardise(j_speech, mean_vec_join, std_vec_join) 
+        # print '---------b'
+        # print j_speech  
+        # print np.mean(j_speech, axis=0).tolist()
+        # print np.std(j_speech, axis=0).tolist() 
+              
         j_frames, j_dim = j_speech.shape
         if j_frames != len(pms_seconds):  
             print (j_frames, len(pms_seconds))
@@ -318,8 +340,23 @@ def main_work(config, overwrite_existing_data=False):
     print 'Storing hybrid voice data:'
     for thing in f.values():
         print thing
+
+
+
+    # print '-------a' 
+    # t = f["train_unit_features"][:,:]
+    # print np.mean(t, axis=0).tolist()
+    # print np.std(t, axis=0).tolist() 
+    # print np.min(t, axis=0).tolist()
+    # print np.max(t, axis=0).tolist()      
+    # sys.exit('uuuuuuuu')
+
+
+
     f.close()
     
+
+
     print 'Stored training data for %s sentences to %s'%(n_train_utts, database_fname)
        
     if config['dump_join_data']:       
@@ -374,6 +411,7 @@ def reinsert_terminal_silence(speech, labels, silence_symbols=['#']):
 
 def get_mean(flist, dim, exclude_uv=False):
     '''
+    Take mean over each coeff, to centre their trajectories around zero.
     '''
     frame_sum = np.zeros(dim)
     frame_count = 0
@@ -394,11 +432,19 @@ def get_mean(flist, dim, exclude_uv=False):
         frame_sum += speech.sum(axis=0)
         m,n = np.shape(speech)
         frame_count += m
-        
+
+
+
     mean_vec = frame_sum / float(frame_count)
     return mean_vec, frame_count
     
 def get_std(flist, dim, mean_vec, exclude_uv=False):
+    '''
+    Unlike mean, use single std value over all coeffs in stream, to preserve relative differences in range of coeffs within a stream
+    The value we use is the largest std across the coeffs, which means that this stream when normalised
+    will have std of 1.0, and other streams decreasing. 
+    Reduplicate this single value to vector the width of the stream.
+    '''
     diff_sum = np.zeros(dim)
     frame_count = 0    
     for fname in flist:
@@ -416,24 +462,44 @@ def get_std(flist, dim, mean_vec, exclude_uv=False):
             speech = speech[speech[:,0]>0.0, :]
                                 
         m,n = np.shape(speech)
-        mean_mat = np.tile(mean_vec,(m,1))
-        sq_diffs = (speech - mean_mat) ** 2
+        #mean_mat = np.tile(mean_vec,(m,1))
+        mean_vec = mean_vec.reshape((1,-1))
+        sq_diffs = (speech - mean_vec) ** 2
         diff_sum += sq_diffs.sum(axis=0)
         frame_count += m
-    std_vec = (diff_sum / float(frame_count)) ** 0.5
+
+    max_diff_sum = diff_sum.max()
+    print mean_vec.tolist()
+    print max_diff_sum.tolist()
+    std_val = (max_diff_sum / float(frame_count)) ** 0.5
+    std_vec = np.ones((1,dim)) * std_val
     return std_vec
     
 def standardise(speech, mean_vec, std_vec):
 
     m,n = np.shape(speech)
         
+    ### record where unvoiced values are with Boolean array, so we can revert them later:
+    uv_positions = (speech==const.special_uv_value)
+
     ## TODO: switch to broadcasting here
-    mean_mat = np.tile(mean_vec,(m,1))
-    std_mat = np.tile(std_vec,(m,1))
+    mean_vec = mean_vec.reshape((1,-1))
+    # std_mat = std_vec,(m,1))
     
     ## standardise:-
-    speech = (speech - mean_mat) / std_mat
+    speech = (speech - mean_vec) / std_vec
     
+    uv_values = std_vec * -1.0 * const.uv_scaling_factor
+
+    for column in range(n):
+        # print speech[:,column].shape
+        # print uv_positions[:,column].shape
+        # print speech[:,column]
+        # print uv_positions[:,column]
+        # print column
+        #if True in uv_positions[:,column]:
+        speech[:,column][uv_positions[:,column]] = uv_values[0, column]
+
     ## leave weighting till later!
     return speech
 
@@ -441,12 +507,12 @@ def destandardise(speech, mean_vec, std_vec):
 
     m,n = np.shape(speech)
         
-    mean_mat = np.tile(mean_vec,(m,1))
-    std_mat = np.tile(std_vec,(m,1))
+    mean_vec = mean_vec.reshape((1,-1))
+    #std_mat = np.tile(std_vec,(m,1))
     #weight_mat = np.tile(weight_vec,(m,1))
     
     ## standardise:-
-    speech = (speech * std_mat) + mean_mat
+    speech = (speech * std_vec) + mean_vec
     
     ## leave weighting till later!
     # speech = speech * weight_mat
@@ -475,20 +541,36 @@ def compose_speech(feat_dir_dict, base, stream_list, datadims):
             print stream_fname + ' does not exist'
             return np.zeros((1,1))
         stream_data = get_speech(stream_fname, datadims[stream])
-        
+
+        ### previously:        
+        # if stream in vuv_stream_names:
+        #     uv_ix = np.arange(stream_data.shape[0])[stream_data[:,0]<=0.0]
+        #     vuv = np.ones(stream_data.shape)
+        #     vuv[uv_ix, :] = 0.0
+        #     ## set F0 to utterance's voiced frame mean in unvoiced frames:   
+        #     voiced = stream_data[stream_data>0.0]
+        #     if voiced.size==0:
+        #         voiced_mean = 100.0 ### TODO: fix artibrary nnumber!
+        #     else:
+        #         voiced_mean = voiced.mean()
+        #     stream_data[stream_data<=0.0] = voiced_mean 
+        #     stream_data_list.append(stream_data)
+        #     stream_data_list.append(vuv)
+
+        ### Now, just set unvoiced frames to -1.0 (they will be specially weighted later):
         if stream in vuv_stream_names:
-            uv_ix = np.arange(stream_data.shape[0])[stream_data[:,0]<=0.0]
-            vuv = np.ones(stream_data.shape)
-            vuv[uv_ix, :] = 0.0
+            # uv_ix = np.arange(stream_data.shape[0])[stream_data[:,0]<=0.0]
+            # vuv = np.ones(stream_data.shape)
+            # vuv[uv_ix, :] = 0.0
             ## set F0 to utterance's voiced frame mean in unvoiced frames:   
-            voiced = stream_data[stream_data>0.0]
-            if voiced.size==0:
-                voiced_mean = 100.0 ### TODO: fix artibrary nnumber!
-            else:
-                voiced_mean = voiced.mean()
-            stream_data[stream_data<=0.0] = voiced_mean 
+            # voiced = stream_data[stream_data>0.0]
+            # if voiced.size==0:
+            #     voiced_mean = 100.0 ### TODO: fix artibrary nnumber!
+            # else:
+            #     voiced_mean = voiced.mean()
+            stream_data[stream_data<=0.0] = const.special_uv_value
             stream_data_list.append(stream_data)
-            stream_data_list.append(vuv)
+            # stream_data_list.append(vuv)
         else:
             stream_data_list.append(stream_data)
 
@@ -547,7 +629,10 @@ def make_train_condition_name(config):
     '''
     condition name including any important hyperparams
     '''
-    return '%s_utts'%(config['n_train_utts'])
+    ### N-train_utts doesn't account for exclusions due to train_list, bad data etc. TODO - fix?
+    jstreams = '-'.join(config['stream_list_join'])
+    tstreams = '-'.join(config['stream_list_target'])
+    return '%s_utts_jstreams-%s_tstreams-%s'%(config['n_train_utts'], jstreams, tstreams)
 
 
 def read_label(labfile, quinphone_regex):
@@ -808,14 +893,14 @@ def get_mean_std(feat_dir_dict, stream_list, datadims, flist):
     mean_vec = []
     for stream in stream_list:
         mean_vec.append(means[stream])
-        if stream in vuv_stream_names: ## add fake stats for VUV which will leave values unaffected
-            mean_vec.append(numpy.zeros(means[stream].shape))
+        # if stream in vuv_stream_names: ## add fake stats for VUV which will leave values unaffected
+        #     mean_vec.append(numpy.zeros(means[stream].shape))
 
     std_vec = []
     for stream in stream_list:
         std_vec.append(stds[stream])
-        if stream in vuv_stream_names: ## add fake stats for VUV which will leave values unaffected
-            std_vec.append(numpy.ones(stds[stream].shape))
+        # if stream in vuv_stream_names: ## add fake stats for VUV which will leave values unaffected
+        #     std_vec.append(numpy.ones(stds[stream].shape))
 
     mean_vec = np.hstack(mean_vec)
     std_vec = np.hstack(std_vec)

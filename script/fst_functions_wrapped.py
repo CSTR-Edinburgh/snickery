@@ -164,6 +164,56 @@ def make_sausage_lattice(probs, weight_factor=1.0):
     return f
 
 
+## As cost_cache_to_text_fst but don't write anything -- compile directly
+def cost_cache_to_compiled_fst(cost_cache, join_cost_weight=1.0, keep_weights=True, \
+                                                                         final_frame_list=[]):
+    '''
+    Take dict-like cost_cache of form {(from_index, to_index): weight} 
+    From and to indices index frames of data -- starting from zero (1 is added within
+    function to satisfy FST format)
+    '''
+    fst = []
+    frames = []
+    for (fro, to) in cost_cache.keys():
+        frames.extend([fro, to])
+    frames = sorted(list(set(frames)))  # unique
+    frame2state = dict(zip(frames, range(1,len(frames)+1)))
+    
+    if len(final_frame_list) == 0:
+        # allow to jump in and out anywhere
+        initial_frames = frames
+        final_frames = frames
+    else:
+        initial_frames = (final_frame_list + 1)#[:-1]  ## could also prepend 0
+        final_frames = final_frame_list
+
+    ## ways in from start state 0 (unweighted, with epsilon in and out symbols):
+    for frame in initial_frames:
+        fst.append('0 %s 0 0'%(frame2state[frame]))  
+    
+    ## real transitions:
+    for ((fro, to), weight) in cost_cache.items():
+        if keep_weights:
+            fst.append('%s %s %s %s %s'%(frame2state[fro], frame2state[to], fro+1, fro+1, weight))
+        else:
+            fst.append('%s %s %s %s'%(frame2state[fro], frame2state[to], fro+1, fro+1))
+                        
+    ## out transitions (labels, no wirghts)
+    sink_state = len(frames)+1
+    for frame in final_frames:
+        fst.append('%s %s %s %s'%(frame2state[frame], sink_state, frame+1, frame+1))         
+    
+    fst.append('%s'%(sink_state))
+    
+    compiler = openfst.Compiler()    
+    for line in fst:
+        print >> compiler, line
+    f = compiler.compile()
+    #f.arcsort(st="olabel")
+    return f
+
+    
+
 def cost_cache_to_text_fst(cost_cache, outfile, join_cost_weight=1.0, keep_weights=True, \
                                                                          final_frame_list=[]):
     '''
@@ -224,6 +274,7 @@ def cost_cache_to_text_fst(cost_cache, outfile, join_cost_weight=1.0, keep_weigh
         f.write(line + '\n')
     f.close()
     
+
 
 
 
