@@ -112,7 +112,7 @@ def main_work(config, overwrite_existing_data=False):
 
     ## Finally, only take utterances which occur in train_list, if it is given in config:
     if 'train_list' in config:
-        assert os.path.isfile(config['train_list'])
+        assert os.path.isfile(config['train_list']), 'File %s does not exist'%(config['train_list'])
         train_list = readlist(config['train_list'])
         train_list = dict(zip(train_list, train_list))
         flist = [name for name in flist if name in train_list]

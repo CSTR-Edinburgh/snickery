@@ -1,6 +1,7 @@
 
 
 import os
+import re
 import numpy
 import numpy as np
 from speech_manip import get_speech, put_speech, rate2fftlength, rate2worldapsize
@@ -131,6 +132,11 @@ def makedirecs(direcs):
     for direc in direcs:
         if not os.path.isdir(direc):
             os.makedirs(direc)
+
+def basename(fname):
+    path, name = os.path.split(fname)
+    base = re.sub('\.[^\.]+\Z','',name)
+    return base
 
 def split_into_streams(speech, stream_names, datadims):
     

@@ -19,7 +19,7 @@ import pywrapfst as openfst
 
 from sklearn.neighbors import KDTree as sklearn_KDTree
 
-from util import safe_makedir, vector_to_string
+from util import safe_makedir, vector_to_string, basename
 from speech_manip import read_wave, write_wave, weight
 from label_manip import break_quinphone, extract_monophone
 from train_halfphone import get_data_dump_name, compose_speech, standardise, \
@@ -32,7 +32,7 @@ DODEBUG=False ## print debug information?
 from train_halfphone import debug
 
 
-import pylab
+# import pylab
 
 WRAPFST=True # True: used python bindings (pywrapfst) to OpenFST; False: use command line interface
 
@@ -46,23 +46,13 @@ from const import label_delimiter
 
 
 
-import matplotlib.pyplot as plt; plt.rcdefaults()
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt; plt.rcdefaults()
+# import matplotlib.pyplot as plt
 
 
-verbose =   False # True # False
+# verbose = False # True # False
 
 
-## TODO_ verbosity level -- logging?
-def start_clock(comment):
-    if verbose:
-        print '%s... '%(comment),    
-    return (timeit.default_timer(), comment)
-
-def stop_clock((start_time, comment), width=40):
-    padding = (width - len(comment)) * ' '
-    if verbose:
-        print '%s--> took %.2f seconds' % (padding, (timeit.default_timer() - start_time))  ##  / 60.)  ## min
 
 def suppress_weird_festival_pauses(label, replace_list=['B_150'], replacement='pau'):
     outlabel = []
@@ -81,6 +71,7 @@ def suppress_weird_festival_pauses(label, replace_list=['B_150'], replacement='p
 class Synthesiser(object):
 
     def __init__(self, config_file):
+
 
 
         self.mode_of_operation = 'normal'
@@ -161,7 +152,7 @@ class Synthesiser(object):
         assert self.config['preselection_method'] in ['acoustic', 'quinphone']
         if self.config['preselection_method'] == 'acoustic':
 
-            start_time = start_clock('build KD tree')
+            start_time = self.start_clock('build KD tree')
             
             # if config['kdt_implementation'] == 'sklearn':
             #train = weight(self.train_unit_features, self.target_weight_vector)
@@ -172,7 +163,7 @@ class Synthesiser(object):
             # elif config['kdt_implementation'] == 'stashable':
             #     tree = StashableKDTree.StashableKDTree(train, leaf_size=1, metric='euclidean')
                 
-            stop_clock(start_time)
+            self.stop_clock(start_time)
 
 
 
@@ -180,7 +171,9 @@ class Synthesiser(object):
         print 'Database loaded'
         print '\n\n----------\n\n'
 
+
         self.test_data_target_dirs = locate_stream_directories(self.config['test_data_dirs'], self.stream_list_target)
+        self.tune_data_target_dirs = locate_stream_directories(self.config['tune_data_dirs'], self.stream_list_target)
         print 'Found target directories: %s'%(self.test_data_target_dirs)
         print 
         print 
@@ -229,6 +222,49 @@ class Synthesiser(object):
         self.concatenate(np.arange(100, 150), ofile)    
         
 
+    def get_sentence_set(self, set_name):
+        assert set_name in ['test', 'tune']
+
+        first_stream = self.stream_list_target[0]
+
+        if set_name == 'test':
+            data_dirs = self.test_data_target_dirs[first_stream]
+            name_patterns = self.config['test_patterns']
+            limit = self.config['n_test_utts']
+        elif set_name == 'tune':
+            data_dirs = self.tune_data_target_dirs[first_stream]
+            name_patterns = self.config['tune_patterns']
+            limit = self.config['n_tune_utts']            
+        else:
+            sys.exit('Set name unknown: "%s"'%(set_name))
+
+        flist = sorted(glob.glob(data_dirs + '/*.' + first_stream))
+        flist = [basename(fname) for fname in flist]
+
+        ## find all files containing one of the patterns in test_patterns
+        
+        L = len(flist)
+        selected_flist = []
+        for (i,fname) in enumerate(flist):
+            for pattern in name_patterns:
+                if pattern in fname:
+                    if fname not in selected_flist:
+                        selected_flist.append(fname)
+                    
+        flist = selected_flist 
+
+        ### Only synthesise n sentences:
+        if limit > 0:
+            flist = flist[:limit]
+
+        nfiles = len(flist)
+        if nfiles == 0:
+            print 'No files found for set "%s" based on configured test_data_dir and test_pattern'%(set_name)
+        else:
+            self.report('synthesising %s utternances based on config'%(nfiles))
+        return flist
+
+
     def get_test_sentences(self):
 
         first_stream = self.stream_list_target[0]
@@ -257,12 +293,14 @@ class Synthesiser(object):
             self.report('synthesising %s utternances based on config'%(ntest))
         return test_flist
 
-    def synth_from_config(self, inspect_join_weights_only=False):
+
+
+    def synth_from_config(self, inspect_join_weights_only=False, synth_type='test'):
 
         self.report('synth_from_config')
 
 
-        test_flist = self.get_test_sentences()
+        test_flist = self.get_sentence_set(synth_type)
 
 
         # if self.mode_of_operation == 'stream_weight_balancing':
@@ -286,7 +324,7 @@ class Synthesiser(object):
             # else:    
 
 
-            self.synth_utt(fname)    
+            self.synth_utt(fname, synth_type=synth_type)    
 
         # if self.mode_of_operation == 'stream_weight_balancing':
         #     all_tscores = np.vstack(all_tscores)
@@ -453,10 +491,20 @@ def get_facts(vals):
         return self.synth_utt(fname)
 
 
-    def synth_utts_bulk(self, fnames): 
+    def synth_utts_bulk(self, fnames, synth_type='test'): 
         '''
         Share a single join lattice to save time---
         '''
+        if synth_type == 'test':
+            data_dirs = self.test_data_target_dirs
+            lab_dir = self.config['test_lab_dir']
+        elif synth_type == 'tune':
+            data_dirs = self.tune_data_target_dirs
+            lab_dir = self.config['tune_lab_dir']            
+        else:
+            sys.exit('Unknown synth_type  9058324378375')
+
+
         train_condition = make_train_condition_name(self.config)
         synth_condition = self.make_synthesis_condition_name()
         synth_dir = os.path.join(self.config['workdir'], 'synthesis', train_condition, synth_condition)
@@ -467,14 +515,14 @@ def get_facts(vals):
         T_per_utt = []
         target_features_per_utt = []
 
-        for fname in fnames:
-            junk,base = os.path.split(fname)
+        for base in fnames:
+            
             self.report('               ==== SYNTHESISE %s ===='%(base))
-            base = base.replace('.mgc','')
+            
             outstem = os.path.join(synth_dir, base)       
 
-            start_time = start_clock('Get speech ')
-            speech = compose_speech(self.test_data_target_dirs, base, self.stream_list_target, \
+            start_time = self.start_clock('Get speech ')
+            speech = compose_speech(data_dirs, base, self.stream_list_target, \
                                     self.config['datadims_target']) 
 
             m,dim = speech.shape
@@ -485,7 +533,7 @@ def get_facts(vals):
             #fshift_seconds = (0.001 * self.config['frameshift_ms'])
             #fshift = int(self.config['sample_rate'] * fshift_seconds)        
 
-            labfile = os.path.join(self.config['test_lab_dir'], base + '.' + self.config['lab_extension'])
+            labfile = os.path.join(lab_dir, base + '.' + self.config['lab_extension'])
             labs = read_label(labfile, self.quinphone_regex)
 
             if self.config.get('untrim_silence_target_speech', False):
@@ -503,19 +551,19 @@ def get_facts(vals):
             #print unit_names
 
             n_units = len(unit_names)
-            stop_clock(start_time)
+            self.stop_clock(start_time)
 
 
             if self.config['preselection_method'] == 'acoustic':
 
-                start_time = start_clock('Acoustic select units ')
+                start_time = self.start_clock('Acoustic select units ')
                 ## call has same syntax for sklearn and scipy KDTrees:--
                 distances, candidates = self.tree.query(unit_features, k=self.config['n_candidates'])
-                stop_clock(start_time) 
+                self.stop_clock(start_time) 
 
             elif self.config['preselection_method'] == 'quinphone':
 
-                start_time = start_clock('Preselect units ')
+                start_time = self.start_clock('Preselect units ')
                 #candidates = np.ones((n_units, self.config['n_candidates'])) * -1
                 candidates = []
                 for quinphone in unit_names:
@@ -541,10 +589,10 @@ def get_facts(vals):
                         current_candidates += [-1]*difference
                     candidates.append(current_candidates)
                 candidates = np.array(candidates)
-                stop_clock(start_time)          
+                self.stop_clock(start_time)          
 
 
-                start_time = start_clock('Compute target distances...')
+                start_time = self.start_clock('Compute target distances...')
                 zero_target_cost = False
                 if zero_target_cost:
                     distances = np.ones(candidates.shape)
@@ -556,7 +604,7 @@ def get_facts(vals):
                         dists = np.sqrt(np.sum(((candidate_features - target_features)**2), axis=1))
                         distances.append(dists)
                     distances = np.array(distances)
-                stop_clock(start_time)          
+                self.stop_clock(start_time)          
            
 
             else:
@@ -564,13 +612,13 @@ def get_facts(vals):
 
 
         
-            start_time = start_clock('Make target FST')
+            start_time = self.start_clock('Make target FST')
             if WRAPFST:
                 T = make_target_sausage_lattice(distances, candidates)        
             else:
                 comm('rm -f /tmp/{target,join,comp,output}.*') ## TODO: don't rely on /tmp/ !
                 make_t_lattice_SIMP(distances, candidates, '/tmp/target.fst.txt')
-            stop_clock(start_time)          
+            self.stop_clock(start_time)          
 
             distances_per_utt.append(distances)
             candidates_per_utt.append(candidates)
@@ -584,7 +632,7 @@ def get_facts(vals):
 
         direct = True   ### compile J directly without writing to text? In fact doesn't save much time...
 
-        #start_time = start_clock('Make join FST with distances...')
+        #start_time = self.start_clock('Make join FST with distances...')
         if False: # self.precomputed_joincost:
             print 'FORCE: Use existing join cost loaded from %s'%(self.join_cost_file)
         else:
@@ -599,20 +647,20 @@ def get_facts(vals):
                 self.make_on_the_fly_join_lattice_BLOCK(candidates, self.join_cost_file, direct=False) ## much faster -- always use this one
 
 
-                t = start_clock('    COMPILE')
+                t = self.start_clock('    COMPILE')
                 compile_fst(self.tool, self.join_cost_file, self.join_cost_file + '.bin')
-                stop_clock(t)
+                self.stop_clock(t)
 
 
         best_path_per_utt = []
         for T in T_per_utt:
-            start_time = start_clock('Compose and find shortest path')  
+            start_time = self.start_clock('Compose and find shortest path')  
             if WRAPFST:
                 if True: # not self.precomputed_joincost:
                     if not direct:
                         J = openfst.Fst.read(self.join_cost_file + '.bin')
-                    #stop_clock(start_time)     
-                    #start_time = start_clock('Compose and find shortest path 2')     
+                    #self.stop_clock(start_time)     
+                    #start_time = self.start_clock('Compose and find shortest path 2')     
                     best_path = get_best_path_SIMP(T, J, \
                                                     join_already_compiled=True, \
                                                     add_path_of_last_resort=False)                        
@@ -627,7 +675,7 @@ def get_facts(vals):
                                                 add_path_of_last_resort=True)
 
             best_path_per_utt.append(best_path)
-            stop_clock(start_time)          
+            self.stop_clock(start_time)          
 
 
             self.report( 'got shortest path:')
@@ -644,9 +692,9 @@ def get_facts(vals):
             self.report('' )
         else:
             sys.exit('TODO: bulk synth for plain synthesis')
-            start_time = start_clock('Extract and join units')
+            start_time = self.start_clock('Extract and join units')
             self.concatenate(best_path, outstem + '.wav')    
-            stop_clock(start_time)          
+            self.stop_clock(start_time)          
             self.report( 'Output wave: %s.wav'%(outstem ))
             self.report('')
             self.report('')
@@ -658,7 +706,7 @@ def get_facts(vals):
                 tscores = self.get_target_scores_per_stream(target_features, best_path)
                 jscores = self.get_join_scores_per_stream(best_path)
 
-                print self.get_njoins(best_path)
+                #print self.get_njoins(best_path)
 
                 scores_per_utt.append( (tscores, jscores) )
             return scores_per_utt
@@ -670,20 +718,29 @@ def get_facts(vals):
 
 
 
-    def synth_utt(self, fname): # , stream_weight_balancing=False):
+    def synth_utt(self, base, synth_type='tune'): # , stream_weight_balancing=False):
+
+        if synth_type == 'test':
+            data_dirs = self.test_data_target_dirs
+            lab_dir = self.config['test_lab_dir']
+        elif synth_type == 'tune':
+            data_dirs = self.tune_data_target_dirs
+            lab_dir = self.config['tune_lab_dir']            
+        else:
+            sys.exit('Unknown synth_type  9489384')
 
         train_condition = make_train_condition_name(self.config)
         synth_condition = self.make_synthesis_condition_name()
-        synth_dir = os.path.join(self.config['workdir'], 'synthesis', train_condition, synth_condition)
+        synth_dir = os.path.join(self.config['workdir'], 'synthesis_%s'%(synth_type), train_condition, synth_condition)
         safe_makedir(synth_dir)
             
-        junk,base = os.path.split(fname)
+        # print '.',
         self.report('               ==== SYNTHESISE %s ===='%(base))
-        base = base.replace('.mgc','')
+
         outstem = os.path.join(synth_dir, base)       
 
-        start_time = start_clock('Get speech ')
-        speech = compose_speech(self.test_data_target_dirs, base, self.stream_list_target, \
+        start_time = self.start_clock('Get speech ')
+        speech = compose_speech(data_dirs, base, self.stream_list_target, \
                                 self.config['datadims_target']) 
 
         m,dim = speech.shape
@@ -694,7 +751,7 @@ def get_facts(vals):
         #fshift_seconds = (0.001 * self.config['frameshift_ms'])
         #fshift = int(self.config['sample_rate'] * fshift_seconds)        
 
-        labfile = os.path.join(self.config['test_lab_dir'], base + '.' + self.config['lab_extension'])
+        labfile = os.path.join(lab_dir, base + '.' + self.config['lab_extension'])
         labs = read_label(labfile, self.quinphone_regex)
 
         if self.config.get('untrim_silence_target_speech', False):
@@ -712,19 +769,19 @@ def get_facts(vals):
         #print unit_names
 
         n_units = len(unit_names)
-        stop_clock(start_time)
+        self.stop_clock(start_time)
 
 
         if self.config['preselection_method'] == 'acoustic':
 
-            start_time = start_clock('Acoustic select units ')
+            start_time = self.start_clock('Acoustic select units ')
             ## call has same syntax for sklearn and scipy KDTrees:--
             distances, candidates = self.tree.query(unit_features, k=self.config['n_candidates'])
-            stop_clock(start_time) 
+            self.stop_clock(start_time) 
 
         elif self.config['preselection_method'] == 'quinphone':
 
-            start_time = start_clock('Preselect units ')
+            start_time = self.start_clock('Preselect units ')
             #candidates = np.ones((n_units, self.config['n_candidates'])) * -1
             candidates = []
             for quinphone in unit_names:
@@ -750,10 +807,10 @@ def get_facts(vals):
                     current_candidates += [-1]*difference
                 candidates.append(current_candidates)
             candidates = np.array(candidates)
-            stop_clock(start_time)          
+            self.stop_clock(start_time)          
 
 
-            start_time = start_clock('Compute target distances...')
+            start_time = self.start_clock('Compute target distances...')
             zero_target_cost = False
             if zero_target_cost:
                 distances = np.ones(candidates.shape)
@@ -765,7 +822,7 @@ def get_facts(vals):
                     dists = np.sqrt(np.sum(((candidate_features - target_features)**2), axis=1))
                     distances.append(dists)
                 distances = np.array(distances)
-            stop_clock(start_time)          
+            self.stop_clock(start_time)          
        
 
         else:
@@ -773,17 +830,17 @@ def get_facts(vals):
 
 
     
-        start_time = start_clock('Make target FST')
+        start_time = self.start_clock('Make target FST')
         if WRAPFST:
             T = make_target_sausage_lattice(distances, candidates)        
         else:
             comm('rm -f /tmp/{target,join,comp,output}.*') ## TODO: don't rely on /tmp/ !
             make_t_lattice_SIMP(distances, candidates, '/tmp/target.fst.txt')
-        stop_clock(start_time)          
+        self.stop_clock(start_time)          
 
         direct = True   ### compile J directly without writing to text? In fact doesn't save much time...
 
-        #start_time = start_clock('Make join FST with distances...')
+        #start_time = self.start_clock('Make join FST with distances...')
         if False: # self.precomputed_joincost:
             print 'FORCE: Use existing join cost loaded from %s'%(self.join_cost_file)
         else:
@@ -798,26 +855,26 @@ def get_facts(vals):
                 self.make_on_the_fly_join_lattice_BLOCK(candidates, self.join_cost_file, direct=False) ## much faster -- always use this one
 
 
-                t = start_clock('    COMPILE')
+                t = self.start_clock('    COMPILE')
                 compile_fst(self.tool, self.join_cost_file, self.join_cost_file + '.bin')
-                stop_clock(t)
+                self.stop_clock(t)
 
 
             #print 'sleep 1...'
  #           os.system('sleep 1')  
-        #stop_clock(start_time)          
+        #self.stop_clock(start_time)          
 
     
 
 
 
-        start_time = start_clock('Compose and find shortest path')  
+        start_time = self.start_clock('Compose and find shortest path')  
         if WRAPFST:
             if True: # not self.precomputed_joincost:
                 if not direct:
                     J = openfst.Fst.read(self.join_cost_file + '.bin')
-                #stop_clock(start_time)     
-                #start_time = start_clock('Compose and find shortest path 2')     
+                #self.stop_clock(start_time)     
+                #start_time = self.start_clock('Compose and find shortest path 2')     
                 best_path = get_best_path_SIMP(T, J, \
                                                 join_already_compiled=True, \
                                                 add_path_of_last_resort=False)                        
@@ -830,7 +887,7 @@ def get_facts(vals):
             best_path = get_best_path_SIMP(self.tool, '/tmp/target.fst.txt', self.join_cost_file, \
                                             join_already_compiled=self.precomputed_joincost, \
                                             add_path_of_last_resort=True)
-        stop_clock(start_time)          
+        self.stop_clock(start_time)          
 
 
         self.report( 'got shortest path:')
@@ -846,9 +903,9 @@ def get_facts(vals):
             self.report( 'balancing stream weights -- skip making waveform')
             self.report('' )
         else:
-            start_time = start_clock('Extract and join units')
+            start_time = self.start_clock('Extract and join units')
             self.concatenate(best_path, outstem + '.wav')    
-            stop_clock(start_time)          
+            self.stop_clock(start_time)          
             self.report( 'Output wave: %s.wav'%(outstem ))
             self.report('')
             self.report('')
@@ -858,7 +915,7 @@ def get_facts(vals):
             tscores = self.get_target_scores_per_stream(target_features, best_path)
             jscores = self.get_join_scores_per_stream(best_path)
 
-            print self.get_njoins(best_path)
+            #print self.get_njoins(best_path)
 
             return (tscores, jscores)
 
@@ -868,9 +925,21 @@ def get_facts(vals):
 
             self.get_path_information(target_features, best_path)
 
+    ## TODO_ verbosity level -- logging?
     def report(self, msg):
         if self.verbose:
             print msg
+
+    def start_clock(self, comment):
+        if self.verbose:
+            print '%s... '%(comment),    
+        return (timeit.default_timer(), comment)
+
+    def stop_clock(self, (start_time, comment), width=40):
+        padding = (width - len(comment)) * ' '
+        if self.verbose:
+            print '%s--> took %.2f seconds' % (padding, (timeit.default_timer() - start_time))  ##  / 60.)  ## min
+
 
     def get_target_scores_per_stream(self, target_features, best_path):
         chosen_features = self.train_unit_features[best_path]
@@ -1560,7 +1629,7 @@ def get_facts(vals):
         first_list = []
         second_list = []
 
-        t = start_clock('     COST LIST')
+        t = self.start_clock('     COST LIST')
 
         for ind in inds:
             frames, cands = np.shape(ind)
@@ -1597,22 +1666,22 @@ def get_facts(vals):
                         #cost_cache[(first, second)] = weight
                         first_list.append(first)
                         second_list.append(second)
-        stop_clock(t)
+        self.stop_clock(t)
 
 
 
-        t = start_clock('     DISTS')
+        t = self.start_clock('     DISTS')
         dists = self.get_natural_distance_vectorised(first_list, second_list, order=1)
         #print dists
-        stop_clock(t)
+        self.stop_clock(t)
 
-        t = start_clock('     make cost cache')
+        t = self.start_clock('     make cost cache')
         cost_cache = dict([((l,r), weight) for (l,r,weight) in zip(first_list, second_list, dists)])
-        stop_clock(t)
+        self.stop_clock(t)
 
 
     
-        t = start_clock('      WRITE')
+        t = self.start_clock('      WRITE')
         if direct:
             J = cost_cache_to_compiled_fst(cost_cache, join_cost_weight=join_cost_weight)
         else:
@@ -1624,7 +1693,7 @@ def get_facts(vals):
             ### pruning:--
             #cost_cache = dict([(k,v) for (k,v) in cost_cache.items() if v < 3000.0])
             cost_cache_to_text_fst(cost_cache, outfile, join_cost_weight=join_cost_weight)
-        stop_clock(t)
+        self.stop_clock(t)
 
 
         if direct:
@@ -1803,5 +1872,5 @@ if __name__ == '__main__':
     
     #synth.synth_from_config()
 
-    synth.synth_from_config(inspect_join_weights_only=False)
+    synth.synth_from_config(inspect_join_weights_only=False, synth_type='test')
 

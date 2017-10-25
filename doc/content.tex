@@ -3,7 +3,7 @@
 
 Streams of features for both the target and join costs are standardised as follows. Means are computed per coefficient so that the standardised values will all have zero mean, but a single std value is used to scale all coefficients in each stream. The motivation for this is that we assume stream features that we are using have been designed in such a way that the relative dynamic range of coeffs is proportional to their relative percpetual importance, and we wish to preserve these difference of range in the standardised values. Unvoiced frames of F0 are ignored when coputeing means and stds. Unvoiced values are also treated specally when streams are standardisd -- they are assigned a negative value whose magnitue is given by multiplying the F0 feature's std by a constant factor (20). The motivation here is ... (cf. Rob)
 
-
+Check code!
 
 \section{Join cost}
 
