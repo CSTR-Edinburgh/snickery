@@ -177,10 +177,21 @@ Both acoustic feature directories `join_datadir` and `target_datadir` contain on
 Train like this:
 
 ```
-python script/train_halfphone.py -c ./config/blizzard_replication_01.cfg
+python script/train_halfphone.py -c ./config/blizzard_replication_03.cfg
 ```
 
 Output is placed under the directory configured as `workdir`, in a subdirectory recording notable train-time hyperparameters, so that multiple runs can be done by editing a single config file, without overwriting previous results.
+
+
+### Weight balancing
+
+The config values `join_stream_weights` and `target_stream_weights` are used to scale join and target feature streams and so control their degree of influence on unit sequences selected. They can be set manually, however, a good starting point for adjusting them is the assumption that all the streams used for a subcost should have equal influence. Weights which lead to on average equal influence can be found be an iterative procedure on some held-out material (labels and predictions only -- no natural acoustics are needed, and so the set can be as large as desired). Make the following call to find appropriate stream weights:
+
+```
+python ./script/balance_stream_weights.py -c ./config/blizzard_replication_03.cfg
+```
+
+Weights will be printed to the terminal, and can be pasted into the config file before synthesis is done.
 
 
 ### Synthesis 
@@ -192,7 +203,7 @@ These directories give the locations of inputs required for synthesis with the s
 Synthesise like this:
 
 ```
-python script/synth_halfphone.py -c ./config/blizzard_replication_01.cfg
+python script/synth_halfphone.py -c ./config/blizzard_replication_03.cfg
 ```
 
 Again, output is placed under the directory configured as `workdir`, in a subdirectory recording notable synthesis_time hyperparameters, so that multiple synthesis runs can be done by editing the synthesis-time variables of a single config file, without overwriting previous results.
