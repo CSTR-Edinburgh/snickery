@@ -36,6 +36,8 @@ from train_halfphone import debug
 
 WRAPFST=True # True: used python bindings (pywrapfst) to OpenFST; False: use command line interface
 
+assert WRAPFST
+
 if WRAPFST:
     from fst_functions_wrapped import compile_fst, make_target_sausage_lattice, cost_cache_to_text_fst, get_best_path_SIMP, compile_lm_fst, make_mapping_loop_fst, plot_fst, extract_path, compile_simple_lm_fst, sample_fst, make_sausage_lattice, cost_cache_to_compiled_fst
 else:
@@ -490,6 +492,7 @@ def get_facts(vals):
 
 
     def synth_utts_bulk(self, fnames, synth_type='test'): 
+        ## TODO: does not behave the same as synth_utt ... why not?
         '''
         Share a single join lattice to save time---
         '''
@@ -627,27 +630,15 @@ def get_facts(vals):
         ### Make shared J lattice:
 
 
-        direct = True   ### compile J directly without writing to text? In fact doesn't save much time...
-
-        #start_time = self.start_clock('Make join FST with distances...')
-        if False: # self.precomputed_joincost:
+        direct = True   
+        assert self.precomputed_joincost == False ## TODO: still need to debug this
+        if self.precomputed_joincost:
             print 'FORCE: Use existing join cost loaded from %s'%(self.join_cost_file)
+            sys.exit('not implemented fully')
         else:
-            self.join_cost_file = '/tmp/join.fst'  ## TODO: don't rely on /tmp/ !           
-            ## TODO: WRAPFST  
-
-            # self.make_on_the_fly_join_lattice(candidates, self.join_cost_file)
-            if direct:
-
-                J = self.make_on_the_fly_join_lattice_BLOCK_DIRECT(candidates_per_utt, multiple_sentences=True)
-            else:
-                self.make_on_the_fly_join_lattice_BLOCK(candidates, self.join_cost_file, direct=False) ## much faster -- always use this one
-
-
-                t = self.start_clock('    COMPILE')
-                compile_fst(self.tool, self.join_cost_file, self.join_cost_file + '.bin')
-                self.stop_clock(t)
-
+            ### compile J directly without writing to text then compiling. In fact doesn't save much time...
+            J = self.make_on_the_fly_join_lattice_BLOCK_DIRECT(candidates_per_utt, multiple_sentences=True)
+            
 
         best_path_per_utt = []
         for T in T_per_utt:
@@ -715,7 +706,7 @@ def get_facts(vals):
 
 
 
-    def synth_utt(self, base, synth_type='tune'): # , stream_weight_balancing=False):
+    def synth_utt(self, base, synth_type='tune'): 
 
         if synth_type == 'test':
             data_dirs = self.test_data_target_dirs
@@ -731,9 +722,7 @@ def get_facts(vals):
         synth_dir = os.path.join(self.config['workdir'], 'synthesis_%s'%(synth_type), train_condition, synth_condition)
         safe_makedir(synth_dir)
             
-        # print '.',
         self.report('               ==== SYNTHESISE %s ===='%(base))
-
         outstem = os.path.join(synth_dir, base)       
 
         start_time = self.start_clock('Get speech ')
@@ -762,12 +751,8 @@ def get_facts(vals):
         if self.config['weight_target_data']:                                
             unit_features = weight(unit_features, self.target_weight_vector)       
 
-        #print unit_features
-        #print unit_names
-
         n_units = len(unit_names)
         self.stop_clock(start_time)
-
 
         if self.config['preselection_method'] == 'acoustic':
 
@@ -826,80 +811,37 @@ def get_facts(vals):
         else:
             sys.exit('preselection_method unknown')
 
-
-    
         start_time = self.start_clock('Make target FST')
-        if WRAPFST:
-            T = make_target_sausage_lattice(distances, candidates)        
-        else:
-            comm('rm -f /tmp/{target,join,comp,output}.*') ## TODO: don't rely on /tmp/ !
-            make_t_lattice_SIMP(distances, candidates, '/tmp/target.fst.txt')
+        T = make_target_sausage_lattice(distances, candidates)        
         self.stop_clock(start_time)          
 
-        direct = True   ### compile J directly without writing to text? In fact doesn't save much time...
-
-        #start_time = self.start_clock('Make join FST with distances...')
-        if False: # self.precomputed_joincost:
+        if self.precomputed_joincost:
             print 'FORCE: Use existing join cost loaded from %s'%(self.join_cost_file)
+            sys.exit('precomputed join cost not fully implemented - 87867')
         else:
-            self.join_cost_file = '/tmp/join.fst'  ## TODO: don't rely on /tmp/ !           
-            ## TODO: WRAPFST  
-
-            # self.make_on_the_fly_join_lattice(candidates, self.join_cost_file)
-            if direct:
-
-                J = self.make_on_the_fly_join_lattice_BLOCK_DIRECT(candidates)
-            else:
-                self.make_on_the_fly_join_lattice_BLOCK(candidates, self.join_cost_file, direct=False) ## much faster -- always use this one
-
-
-                t = self.start_clock('    COMPILE')
-                compile_fst(self.tool, self.join_cost_file, self.join_cost_file + '.bin')
-                self.stop_clock(t)
-
-
-            #print 'sleep 1...'
- #           os.system('sleep 1')  
-        #self.stop_clock(start_time)          
-
-    
-
-
+            ### compile J directly without writing to text. In fact doesn't save much time...
+            J = self.make_on_the_fly_join_lattice_BLOCK_DIRECT(candidates)
+            
 
         start_time = self.start_clock('Compose and find shortest path')  
-        if WRAPFST:
-            if True: # not self.precomputed_joincost:
-                if not direct:
-                    J = openfst.Fst.read(self.join_cost_file + '.bin')
-                #self.stop_clock(start_time)     
-                #start_time = self.start_clock('Compose and find shortest path 2')     
-                best_path = get_best_path_SIMP(T, J, \
-                                                join_already_compiled=True, \
-                                                add_path_of_last_resort=False)                        
-            else:
-                J = self.J ## already loaded into memory
-                best_path = get_best_path_SIMP(T, J, \
-                                                join_already_compiled=True, \
-                                                add_path_of_last_resort=True)        
+        if not self.precomputed_joincost:   
+            best_path = get_best_path_SIMP(T, J, \
+                                            join_already_compiled=True, \
+                                            add_path_of_last_resort=False)                        
         else:
-            best_path = get_best_path_SIMP(self.tool, '/tmp/target.fst.txt', self.join_cost_file, \
-                                            join_already_compiled=self.precomputed_joincost, \
-                                            add_path_of_last_resort=True)
+            sys.exit('precomputed join cost not fully implemented - 2338578')
+            J = self.J ## already loaded into memory
+            best_path = get_best_path_SIMP(T, J, \
+                                            join_already_compiled=True, \
+                                            add_path_of_last_resort=True)        
         self.stop_clock(start_time)          
 
-
+        ### TODO:
         # if self.config.get('WFST_pictures', False):
-
-
 
         self.report( 'got shortest path:')
         self.report( best_path)
-        # print len(best_path)
-        # for i in best_path:
-        #     print self.train_unit_names[i]
-
-
-
+ 
         if self.mode_of_operation == 'stream_weight_balancing':
             self.report('' )
             self.report( 'balancing stream weights -- skip making waveform')
@@ -912,19 +854,12 @@ def get_facts(vals):
             self.report('')
             self.report('')
 
-
         if self.mode_of_operation == 'stream_weight_balancing':
             tscores = self.get_target_scores_per_stream(target_features, best_path)
             jscores = self.get_join_scores_per_stream(best_path)
-
-            #print self.get_njoins(best_path)
-
             return (tscores, jscores)
 
-
-
         if self.config['get_selection_info']:
-
             self.get_path_information(target_features, best_path)
 
     ## TODO_ verbosity level -- logging?
