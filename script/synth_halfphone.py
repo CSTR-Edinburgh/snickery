@@ -491,218 +491,218 @@ def get_facts(vals):
         return self.synth_utt(fname)
 
 
-    def synth_utts_bulk(self, fnames, synth_type='test'): 
-        ## TODO: does not behave the same as synth_utt ... why not?
-        '''
-        Share a single join lattice to save time---
-        '''
-        if synth_type == 'test':
-            data_dirs = self.test_data_target_dirs
-            lab_dir = self.config['test_lab_dir']
-        elif synth_type == 'tune':
-            data_dirs = self.tune_data_target_dirs
-            lab_dir = self.config['tune_lab_dir']            
-        else:
-            sys.exit('Unknown synth_type  9058324378375')
+    # def synth_utts_bulk(self, fnames, synth_type='test'): 
+    #     ## TODO: does not behave the same as synth_utt ... why not?
+    #     '''
+    #     Share a single join lattice to save time---
+    #     '''
+    #     if synth_type == 'test':
+    #         data_dirs = self.test_data_target_dirs
+    #         lab_dir = self.config['test_lab_dir']
+    #     elif synth_type == 'tune':
+    #         data_dirs = self.tune_data_target_dirs
+    #         lab_dir = self.config['tune_lab_dir']            
+    #     else:
+    #         sys.exit('Unknown synth_type  9058324378375')
 
 
-        train_condition = make_train_condition_name(self.config)
-        synth_condition = self.make_synthesis_condition_name()
-        synth_dir = os.path.join(self.config['workdir'], 'synthesis', train_condition, synth_condition)
-        safe_makedir(synth_dir)
+    #     train_condition = make_train_condition_name(self.config)
+    #     synth_condition = self.make_synthesis_condition_name()
+    #     synth_dir = os.path.join(self.config['workdir'], 'synthesis', train_condition, synth_condition)
+    #     safe_makedir(synth_dir)
         
-        candidates_per_utt = []
-        distances_per_utt = []
-        T_per_utt = []
-        target_features_per_utt = []
+    #     candidates_per_utt = []
+    #     distances_per_utt = []
+    #     T_per_utt = []
+    #     target_features_per_utt = []
 
-        for base in fnames:
+    #     for base in fnames:
             
-            self.report('               ==== SYNTHESISE %s ===='%(base))
+    #         self.report('               ==== SYNTHESISE %s ===='%(base))
             
-            outstem = os.path.join(synth_dir, base)       
+    #         outstem = os.path.join(synth_dir, base)       
 
-            start_time = self.start_clock('Get speech ')
-            speech = compose_speech(data_dirs, base, self.stream_list_target, \
-                                    self.config['datadims_target']) 
+    #         start_time = self.start_clock('Get speech ')
+    #         speech = compose_speech(data_dirs, base, self.stream_list_target, \
+    #                                 self.config['datadims_target']) 
 
-            m,dim = speech.shape
+    #         m,dim = speech.shape
 
-            if (self.config['standardise_target_data'], True):                                
-                speech = standardise(speech, self.mean_vec_target, self.std_vec_target)         
+    #         if (self.config['standardise_target_data'], True):                                
+    #             speech = standardise(speech, self.mean_vec_target, self.std_vec_target)         
             
-            #fshift_seconds = (0.001 * self.config['frameshift_ms'])
-            #fshift = int(self.config['sample_rate'] * fshift_seconds)        
+    #         #fshift_seconds = (0.001 * self.config['frameshift_ms'])
+    #         #fshift = int(self.config['sample_rate'] * fshift_seconds)        
 
-            labfile = os.path.join(lab_dir, base + '.' + self.config['lab_extension'])
-            labs = read_label(labfile, self.quinphone_regex)
+    #         labfile = os.path.join(lab_dir, base + '.' + self.config['lab_extension'])
+    #         labs = read_label(labfile, self.quinphone_regex)
 
-            if self.config.get('untrim_silence_target_speech', False):
-                speech = reinsert_terminal_silence(speech, labs)
+    #         if self.config.get('untrim_silence_target_speech', False):
+    #             speech = reinsert_terminal_silence(speech, labs)
 
-            if self.config.get('suppress_weird_festival_pauses', False):
-                labs = suppress_weird_festival_pauses(labs)
+    #         if self.config.get('suppress_weird_festival_pauses', False):
+    #             labs = suppress_weird_festival_pauses(labs)
 
-            unit_names, unit_features, unit_timings = get_halfphone_stats(speech, labs)
+    #         unit_names, unit_features, unit_timings = get_halfphone_stats(speech, labs)
            
-            if self.config['weight_target_data']:                                
-                unit_features = weight(unit_features, self.target_weight_vector)       
+    #         if self.config['weight_target_data']:                                
+    #             unit_features = weight(unit_features, self.target_weight_vector)       
 
-            #print unit_features
-            #print unit_names
+    #         #print unit_features
+    #         #print unit_names
 
-            n_units = len(unit_names)
-            self.stop_clock(start_time)
-
-
-            if self.config['preselection_method'] == 'acoustic':
-
-                start_time = self.start_clock('Acoustic select units ')
-                ## call has same syntax for sklearn and scipy KDTrees:--
-                distances, candidates = self.tree.query(unit_features, k=self.config['n_candidates'])
-                self.stop_clock(start_time) 
-
-            elif self.config['preselection_method'] == 'quinphone':
-
-                start_time = self.start_clock('Preselect units ')
-                #candidates = np.ones((n_units, self.config['n_candidates'])) * -1
-                candidates = []
-                for quinphone in unit_names:
-                    current_candidates = []
-                    mono, diphone, triphone, quinphone = break_quinphone(quinphone) 
-                    for form in [quinphone, triphone, diphone, mono]:
-                        for unit in self.unit_index.get(form, []):
-                            current_candidates.append(unit)
-                            if len(current_candidates) == self.config['n_candidates']:
-                                break
-                        if len(current_candidates) == self.config['n_candidates']:
-                            break
-                    if len(current_candidates) == 0:
-                        print 'Warning: no cands in training data to match %s! Use v naive backoff to silence...'%(quinphone)
-                        current_candidates = [self.first_silent_unit]
-                        ## TODO: better backoff?
-
-                    if len(current_candidates) != self.config['n_candidates']:
-                        # 'W', TODO -- warning
-                        #print 'Warning: only %s candidates for %s (%s)' % (len(current_candidates), quinphone, current_candidates)
-                        difference = self.config['n_candidates'] - len(current_candidates) 
-                        current_candidates += [-1]*difference
-                    candidates.append(current_candidates)
-                candidates = np.array(candidates)
-                self.stop_clock(start_time)          
+    #         n_units = len(unit_names)
+    #         self.stop_clock(start_time)
 
 
-                start_time = self.start_clock('Compute target distances...')
-                zero_target_cost = False
-                if zero_target_cost:
-                    distances = np.ones(candidates.shape)
-                else:
-                    distances = []
-                    for (i,row) in enumerate(candidates):
-                        candidate_features = self.train_unit_features[row]
-                        target_features = unit_features[i].reshape((1,-1))
-                        dists = np.sqrt(np.sum(((candidate_features - target_features)**2), axis=1))
-                        distances.append(dists)
-                    distances = np.array(distances)
-                self.stop_clock(start_time)          
+    #         if self.config['preselection_method'] == 'acoustic':
+
+    #             start_time = self.start_clock('Acoustic select units ')
+    #             ## call has same syntax for sklearn and scipy KDTrees:--
+    #             distances, candidates = self.tree.query(unit_features, k=self.config['n_candidates'])
+    #             self.stop_clock(start_time) 
+
+    #         elif self.config['preselection_method'] == 'quinphone':
+
+    #             start_time = self.start_clock('Preselect units ')
+    #             #candidates = np.ones((n_units, self.config['n_candidates'])) * -1
+    #             candidates = []
+    #             for quinphone in unit_names:
+    #                 current_candidates = []
+    #                 mono, diphone, triphone, quinphone = break_quinphone(quinphone) 
+    #                 for form in [quinphone, triphone, diphone, mono]:
+    #                     for unit in self.unit_index.get(form, []):
+    #                         current_candidates.append(unit)
+    #                         if len(current_candidates) == self.config['n_candidates']:
+    #                             break
+    #                     if len(current_candidates) == self.config['n_candidates']:
+    #                         break
+    #                 if len(current_candidates) == 0:
+    #                     print 'Warning: no cands in training data to match %s! Use v naive backoff to silence...'%(quinphone)
+    #                     current_candidates = [self.first_silent_unit]
+    #                     ## TODO: better backoff?
+
+    #                 if len(current_candidates) != self.config['n_candidates']:
+    #                     # 'W', TODO -- warning
+    #                     #print 'Warning: only %s candidates for %s (%s)' % (len(current_candidates), quinphone, current_candidates)
+    #                     difference = self.config['n_candidates'] - len(current_candidates) 
+    #                     current_candidates += [-1]*difference
+    #                 candidates.append(current_candidates)
+    #             candidates = np.array(candidates)
+    #             self.stop_clock(start_time)          
+
+
+    #             start_time = self.start_clock('Compute target distances...')
+    #             zero_target_cost = False
+    #             if zero_target_cost:
+    #                 distances = np.ones(candidates.shape)
+    #             else:
+    #                 distances = []
+    #                 for (i,row) in enumerate(candidates):
+    #                     candidate_features = self.train_unit_features[row]
+    #                     target_features = unit_features[i].reshape((1,-1))
+    #                     dists = np.sqrt(np.sum(((candidate_features - target_features)**2), axis=1))
+    #                     distances.append(dists)
+    #                 distances = np.array(distances)
+    #             self.stop_clock(start_time)          
            
 
-            else:
-                sys.exit('preselection_method unknown')
+    #         else:
+    #             sys.exit('preselection_method unknown')
 
 
         
-            start_time = self.start_clock('Make target FST')
-            if WRAPFST:
-                T = make_target_sausage_lattice(distances, candidates)        
-            else:
-                comm('rm -f /tmp/{target,join,comp,output}.*') ## TODO: don't rely on /tmp/ !
-                make_t_lattice_SIMP(distances, candidates, '/tmp/target.fst.txt')
-            self.stop_clock(start_time)          
+    #         start_time = self.start_clock('Make target FST')
+    #         if WRAPFST:
+    #             T = make_target_sausage_lattice(distances, candidates)        
+    #         else:
+    #             comm('rm -f /tmp/{target,join,comp,output}.*') ## TODO: don't rely on /tmp/ !
+    #             make_t_lattice_SIMP(distances, candidates, '/tmp/target.fst.txt')
+    #         self.stop_clock(start_time)          
 
-            distances_per_utt.append(distances)
-            candidates_per_utt.append(candidates)
-            target_features_per_utt.append(unit_features)
-            T_per_utt.append(T)
-
-
-        ## ==================
-        ### Make shared J lattice:
+    #         distances_per_utt.append(distances)
+    #         candidates_per_utt.append(candidates)
+    #         target_features_per_utt.append(unit_features)
+    #         T_per_utt.append(T)
 
 
-        direct = True   
-        assert self.precomputed_joincost == False ## TODO: still need to debug this
-        if self.precomputed_joincost:
-            print 'FORCE: Use existing join cost loaded from %s'%(self.join_cost_file)
-            sys.exit('not implemented fully')
-        else:
-            ### compile J directly without writing to text then compiling. In fact doesn't save much time...
-            J = self.make_on_the_fly_join_lattice_BLOCK_DIRECT(candidates_per_utt, multiple_sentences=True)
+    #     ## ==================
+    #     ### Make shared J lattice:
+
+
+    #     direct = True   
+    #     assert self.precomputed_joincost == False ## TODO: still need to debug this
+    #     if self.precomputed_joincost:
+    #         print 'FORCE: Use existing join cost loaded from %s'%(self.join_cost_file)
+    #         sys.exit('not implemented fully')
+    #     else:
+    #         ### compile J directly without writing to text then compiling. In fact doesn't save much time...
+    #         J = self.make_on_the_fly_join_lattice_BLOCK_DIRECT(candidates_per_utt, multiple_sentences=True)
             
 
-        best_path_per_utt = []
-        for T in T_per_utt:
-            start_time = self.start_clock('Compose and find shortest path')  
-            if WRAPFST:
-                if True: # not self.precomputed_joincost:
-                    if not direct:
-                        J = openfst.Fst.read(self.join_cost_file + '.bin')
-                    #self.stop_clock(start_time)     
-                    #start_time = self.start_clock('Compose and find shortest path 2')     
-                    best_path = get_best_path_SIMP(T, J, \
-                                                    join_already_compiled=True, \
-                                                    add_path_of_last_resort=False)                        
-                else:
-                    J = self.J ## already loaded into memory
-                    best_path = get_best_path_SIMP(T, J, \
-                                                    join_already_compiled=True, \
-                                                    add_path_of_last_resort=True)        
-            else:
-                best_path = get_best_path_SIMP(self.tool, '/tmp/target.fst.txt', self.join_cost_file, \
-                                                join_already_compiled=self.precomputed_joincost, \
-                                                add_path_of_last_resort=True)
+    #     best_path_per_utt = []
+    #     for T in T_per_utt:
+    #         start_time = self.start_clock('Compose and find shortest path')  
+    #         if WRAPFST:
+    #             if True: # not self.precomputed_joincost:
+    #                 if not direct:
+    #                     J = openfst.Fst.read(self.join_cost_file + '.bin')
+    #                 #self.stop_clock(start_time)     
+    #                 #start_time = self.start_clock('Compose and find shortest path 2')     
+    #                 best_path = get_best_path_SIMP(T, J, \
+    #                                                 join_already_compiled=True, \
+    #                                                 add_path_of_last_resort=False)                        
+    #             else:
+    #                 J = self.J ## already loaded into memory
+    #                 best_path = get_best_path_SIMP(T, J, \
+    #                                                 join_already_compiled=True, \
+    #                                                 add_path_of_last_resort=True)        
+    #         else:
+    #             best_path = get_best_path_SIMP(self.tool, '/tmp/target.fst.txt', self.join_cost_file, \
+    #                                             join_already_compiled=self.precomputed_joincost, \
+    #                                             add_path_of_last_resort=True)
 
-            best_path_per_utt.append(best_path)
-            self.stop_clock(start_time)          
-
-
-            self.report( 'got shortest path:')
-            self.report( best_path)
-            # print len(best_path)
-            # for i in best_path:
-            #     print self.train_unit_names[i]
+    #         best_path_per_utt.append(best_path)
+    #         self.stop_clock(start_time)          
 
 
-
-        if self.mode_of_operation == 'stream_weight_balancing':
-            self.report('' )
-            self.report( 'balancing stream weights -- skip making waveform')
-            self.report('' )
-        else:
-            sys.exit('TODO: bulk synth for plain synthesis')
-            start_time = self.start_clock('Extract and join units')
-            self.concatenate(best_path, outstem + '.wav')    
-            self.stop_clock(start_time)          
-            self.report( 'Output wave: %s.wav'%(outstem ))
-            self.report('')
-            self.report('')
+    #         self.report( 'got shortest path:')
+    #         self.report( best_path)
+    #         # print len(best_path)
+    #         # for i in best_path:
+    #         #     print self.train_unit_names[i]
 
 
-        if self.mode_of_operation == 'stream_weight_balancing':
-            scores_per_utt = []
-            for (target_features, best_path) in zip(target_features_per_utt, best_path_per_utt):
-                tscores = self.get_target_scores_per_stream(target_features, best_path)
-                jscores = self.get_join_scores_per_stream(best_path)
 
-                #print self.get_njoins(best_path)
+    #     if self.mode_of_operation == 'stream_weight_balancing':
+    #         self.report('' )
+    #         self.report( 'balancing stream weights -- skip making waveform')
+    #         self.report('' )
+    #     else:
+    #         sys.exit('TODO: bulk synth for plain synthesis')
+    #         start_time = self.start_clock('Extract and join units')
+    #         self.concatenate(best_path, outstem + '.wav')    
+    #         self.stop_clock(start_time)          
+    #         self.report( 'Output wave: %s.wav'%(outstem ))
+    #         self.report('')
+    #         self.report('')
 
-                scores_per_utt.append( (tscores, jscores) )
-            return scores_per_utt
+
+    #     if self.mode_of_operation == 'stream_weight_balancing':
+    #         scores_per_utt = []
+    #         for (target_features, best_path) in zip(target_features_per_utt, best_path_per_utt):
+    #             tscores = self.get_target_scores_per_stream(target_features, best_path)
+    #             jscores = self.get_join_scores_per_stream(best_path)
+
+    #             #print self.get_njoins(best_path)
+
+    #             scores_per_utt.append( (tscores, jscores) )
+    #         return scores_per_utt
 
 
-        if self.config['get_selection_info']:
-            sys.exit('TODO: bulk synth for plain synthesis 2')
-        #     self.get_path_information(target_features, best_path)
+    #     if self.config['get_selection_info']:
+    #         sys.exit('TODO: bulk synth for plain synthesis 2')
+    #     #     self.get_path_information(target_features, best_path)
 
 
 
@@ -815,6 +815,7 @@ def get_facts(vals):
         T = make_target_sausage_lattice(distances, candidates)        
         self.stop_clock(start_time)          
 
+        self.precomputed_joincost = False
         if self.precomputed_joincost:
             print 'FORCE: Use existing join cost loaded from %s'%(self.join_cost_file)
             sys.exit('precomputed join cost not fully implemented - 87867')
