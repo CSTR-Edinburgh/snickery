@@ -90,10 +90,7 @@ class Synthesiser(object):
         self.datadims_target = self.config['datadims_target']
         self.datadims_join = self.config['datadims_join']
 
-
-        # self.target_weight_vector = np.array(self.config['feature_weights_target'] + self.config['feature_weights_target'])
-        # self.join_weight_vector   = np.array(self.config['feature_weights_join'] )    ### TODO: currently hardcoded for pitch sync cost
-        # assert len(self.target_weight_vector) == sum(self.datadims_target.values()) * 2
+        self.target_representation = self.config['target_representation']
 
         print 'load database...'        
         datafile = get_data_dump_name(self.config)
@@ -207,7 +204,8 @@ class Synthesiser(object):
             #     target_weight_vector.extend([weights[i]]*2)
             # else:
                 target_weight_vector.extend([weights[i]]*self.datadims_target[stream])
-        target_weight_vector = np.array(target_weight_vector + target_weight_vector)    ### TODO: doubled!     
+        nrepetitions = const.target_rep_widths[self.target_representation]
+        target_weight_vector = np.array(target_weight_vector * nrepetitions)   
         self.train_unit_features = weight(self.train_unit_features_unweighted, target_weight_vector)   
 
         ## save this so we can weight incoming predicted acoustics: 
@@ -579,8 +577,7 @@ def get_facts(vals):
                     if len(current_candidates) == 0:
                         print 'Warning: no cands in training data to match %s! Use v naive backoff to silence...'%(quinphone)
                         current_candidates = [self.first_silent_unit]
-                        ## TODO: better backoff
-                        #sys.exit('no cands in training data to match %s! TODO: add backoff...'%(quinphone))
+                        ## TODO: better backoff?
 
                     if len(current_candidates) != self.config['n_candidates']:
                         # 'W', TODO -- warning
@@ -760,7 +757,7 @@ def get_facts(vals):
         if self.config.get('suppress_weird_festival_pauses', False):
             labs = suppress_weird_festival_pauses(labs)
 
-        unit_names, unit_features, unit_timings = get_halfphone_stats(speech, labs)
+        unit_names, unit_features, unit_timings = get_halfphone_stats(speech, labs, representation_type=self.target_representation)
        
         if self.config['weight_target_data']:                                
             unit_features = weight(unit_features, self.target_weight_vector)       
@@ -787,6 +784,7 @@ def get_facts(vals):
             for quinphone in unit_names:
                 current_candidates = []
                 mono, diphone, triphone, quinphone = break_quinphone(quinphone) 
+                #print mono, diphone, triphone, quinphone
                 for form in [quinphone, triphone, diphone, mono]:
                     for unit in self.unit_index.get(form, []):
                         current_candidates.append(unit)
@@ -888,6 +886,10 @@ def get_facts(vals):
                                             join_already_compiled=self.precomputed_joincost, \
                                             add_path_of_last_resort=True)
         self.stop_clock(start_time)          
+
+
+        # if self.config.get('WFST_pictures', False):
+
 
 
         self.report( 'got shortest path:')
@@ -1019,9 +1021,19 @@ def get_facts(vals):
 
         # print stream_errors_join
 
+
+        #### TODO: remove zeros from stream contrib scores below
         print 
         print '------------- join and target cost summaries by stream -----------'
         print
+
+        ## take nonzeros only, but avoid division errors:
+        # stream_errors_join = stream_errors_join[stream_errors_join>0.0]
+        # if stream_errors_join.size == 0:
+        #     stream_errors_join = np.zeros(stream_errors_join.shape) ## avoid divis by 0
+        # stream_errors_target = stream_errors_target[stream_errors_target>0.0]
+        # if stream_errors_target.size == 0:
+        #     stream_errors_target = np.zeros(stream_errors_target.shape) ## avoid divis by 0
 
         for (stream, mu, sig) in zip (self.stream_list_join,
             np.mean(stream_errors_join, axis=0),
@@ -1037,7 +1049,7 @@ def get_facts(vals):
 
 
 
-        print 'Skip plots for now and return'
+        print 'Skip plots for now and return' ### TODO: optionally plot
         return
 
         ## plot scores per unit 

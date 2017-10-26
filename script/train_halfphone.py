@@ -25,7 +25,11 @@ from speech_manip import get_speech
 from label_manip import extract_quinphone
 from util import splice_data, unsplice, safe_makedir, readlist
 import const
-from const import label_delimiter, vuv_stream_names, label_length_diff_tolerance
+from const import label_delimiter, vuv_stream_names, label_length_diff_tolerance, target_rep_widths
+
+
+
+
 
 
 def locate_stream_directories(directories, streams):
@@ -150,6 +154,8 @@ def main_work(config, overwrite_existing_data=False):
     target_dim = mean_vec_target.shape[0]
     join_dim = mean_vec_join.shape[0]
 
+    target_rep_size = target_dim * target_rep_widths[config.get('target_representation', 'twopoint')]
+
     fshift_seconds = (0.001 * config['frameshift_ms'])
     fshift = int(config['sample_rate'] * fshift_seconds)    
     samples_per_frame = fshift
@@ -168,7 +174,7 @@ def main_work(config, overwrite_existing_data=False):
     
     ## 2) get ready to store data in HDF5:
     ## maxshape makes a dataset resizable
-    train_dset = f.create_dataset("train_unit_features", (n_units, 2*target_dim), maxshape=(n_units, 2*target_dim), dtype='f') 
+    train_dset = f.create_dataset("train_unit_features", (n_units, target_rep_size), maxshape=(n_units, target_rep_size), dtype='f') 
     phones_dset = f.create_dataset("train_unit_names", (n_units,), maxshape=(n_units,), dtype='|S50') 
     filenames_dset = f.create_dataset("filenames", (n_units,), maxshape=(n_units,), dtype='|S50') 
     cutpoints_dset = f.create_dataset("cutpoints", (n_units,2), maxshape=(n_units,2), dtype='i') 
@@ -284,7 +290,7 @@ def main_work(config, overwrite_existing_data=False):
         #     continue
 
         ## Get representations of half phones to use in target cost:-
-        unit_names, unit_features, timings = get_halfphone_stats(t_speech, labs)
+        unit_names, unit_features, timings = get_halfphone_stats(t_speech, labs, config.get('target_representation', 'twopoint'))
 
         if config['dump_join_data']:
             start_join_feats, end_join_feats = get_join_data_AL(j_speech, timings, config['join_cost_halfwidth'])
@@ -367,6 +373,8 @@ def main_work(config, overwrite_existing_data=False):
         for thing in fjoin.values():
             print thing
         fjoin.close()
+
+
 
 def check_pitch_sync_speech(j_speech, labs, pms_seconds):
     print '-----------------------'
@@ -632,7 +640,7 @@ def make_train_condition_name(config):
     ### N-train_utts doesn't account for exclusions due to train_list, bad data etc. TODO - fix?
     jstreams = '-'.join(config['stream_list_join'])
     tstreams = '-'.join(config['stream_list_target'])
-    return '%s_utts_jstreams-%s_tstreams-%s'%(config['n_train_utts'], jstreams, tstreams)
+    return '%s_utts_jstreams-%s_tstreams-%s_rep-%s'%(config['n_train_utts'], jstreams, tstreams, config.get('target_representation', 'twopoint'))
 
 
 def read_label(labfile, quinphone_regex):
@@ -666,6 +674,7 @@ def get_cutpoints(timings, pms):
     Find GCIs which are nearest to the start and end of each unit.
     Also return indices of GCIs so we can map easily to pitch-synchronous features.
     '''
+
     cutpoints = []
     indices = []
     for (start, end) in timings:
@@ -683,16 +692,33 @@ def get_cutpoints(timings, pms):
     return (cutpoints, indices)
 
 
-def get_halfphone_stats(speech, labels):
-    '''
-    Arbitrarily assign states 1 & 2 to halfphone 1, and states 3, 4 and 5 to halfphone 2.
-    Characterise a halfphone by the first and last frames appearing in it.
 
+
+
+def get_halfphone_stats(speech, labels, representation_type='twopoint'):
+    '''
     Where there are N hafphones in an utt, return (names, features, timings) where
         -- names is N-element array like (array(['xx~xx-#_L+p=l', 'xx~xx-#_R+p=l', 'xx~#-p_L+l=i', ...
         -- timings is N-element list like [(0, 40), (41, 60), (61, 62), ...
         -- features is N x D array, where D is size of feature vector
+
+    To get from s 5-state alignment for a phone to 2 halfphones, we arbitrarily 
+    assign states 1 & 2 to halfphone 1, and states 3, 4 and 5 to halfphone 2.
+
+    Given this division, various types of representation are possible. A unit can
+    be represented by:
+        -- onepoint: middle frame appearing in it
+        -- twopoint: first and last frames appearing in it
+        -- threepoint: first, middle, and last frames appearing in it
+    We use state alignment in effect to do downsmpling which is non-linear in time.
+    Hence, the 'middle' point is not necessarily equidistant from the start and end
+    of a unit, but rather the last frame in state 2 (for first halfphone) or in state 
+    5 (for second halfphone). Other choices for middle frame are possible. 
     '''
+
+    if representation_type not in ['onepoint', 'twopoint', 'threepoint']:
+        sys.exit('Unknown halfphone representation type: %s '%(representation_type))
+
     
     m,dim = speech.shape
 
@@ -701,7 +727,9 @@ def get_halfphone_stats(speech, labels):
     features = numpy.zeros((nphones*2, dim*2))
     names = []
     starts = []
+    middles = []
     ends = []
+
     halfphone_counter = 0
     for ((s,e),lab) in labels:
         #print ((s,e),lab)
@@ -721,33 +749,56 @@ def get_halfphone_stats(speech, labels):
             assert label_delimiter not in ''.join(halfphone_name), 'delimiter %s occurs in one or more name element (%s)'%(label_delimiter, halfphone_name)
             halfphone_name = label_delimiter.join(halfphone_name)
             names.append(halfphone_name)
-            #names.append(quinphone.replace('+', '_L+'))
-            features[halfphone_counter, :dim] = speech[s,:]
+            #features[halfphone_counter, :dim] = speech[s,:]
+            #if representation_type in ['twopoint', 'threepoint']:
             starts.append(s)
+            #if representation_type in ['onepoint', 'threepoint']:
+            middles.append(e)
         elif state == '3':
-            features[halfphone_counter, dim:] = speech[e,:]  
+            #features[halfphone_counter, dim:] = speech[e,:]  
+            # if representation_type in ['twopoint', 'threepoint']:
             ends.append(e)
-            halfphone_counter += 1                     
+            #halfphone_counter += 1                     
         elif state == '4':
             halfphone_name = copy.copy(quinphone)
             halfphone_name[2] += '_R'
             assert label_delimiter not in ''.join(halfphone_name), 'delimiter %s occurs in one or more name element (%s)'%(label_delimiter, halfphone_name)
             halfphone_name = label_delimiter.join(halfphone_name)
             names.append(halfphone_name)
-            features[halfphone_counter, :dim] = speech[s,:]    
+            #features[halfphone_counter, :dim] = speech[s,:]   
+            # if representation_type in ['twopoint', 'threepoint']: 
             starts.append(s)  
         elif state == '5':
-            pass                      
+            # if representation_type in ['onepoint', 'threepoint']:
+            middles.append(e)                      
         elif state == '6':
-            features[halfphone_counter, dim:] = speech[e,:]   
+            #features[halfphone_counter, dim:] = speech[e,:]  
+            # if representation_type in ['twopoint', 'threepoint']:  
             ends.append(e)        
-            halfphone_counter += 1  
+            #halfphone_counter += 1  
         else:
             sys.exit('bad state number')
                     
-    assert len(names) == nphones*2 == len(starts) == len(ends)
+    assert len(names) == nphones*2 == len(starts) == len(ends) == len(middles)
+
+    # if representation_type in ['twopoint', 'threepoint']: 
+    #     assert len(names) == len(starts) == len(ends)
+    # if representation_type in ['onepoint', 'threepoint']: 
+    #     assert len(names) == len(middles)    
+
     names = np.array(names)
     timings = zip(starts,ends)
+
+    ### construct features with advanced indexing:--
+    if representation_type == 'onepoint':
+        features = speech[middles, :]    
+    elif representation_type == 'twopoint':
+        features = np.hstack([speech[starts,:], speech[ends,:]])    
+    elif representation_type == 'threepoint':
+        features = np.hstack([speech[starts,:], speech[middles,:], speech[ends,:]])
+    else:
+        sys.exit('eifq2o38rf293f')
+        
     return (names, features, timings)
 
 
@@ -767,6 +818,7 @@ def get_contexts_for_pitch_synchronous_joincost(speech, pm_indices):
     gives a 'join context' for the end of a unit. Row p gives the start join context for 
     unit p, and the end join context for unit p-1. 
     ''' 
+
     # enforce that t end is same as t+1 start -- TODO: do this check sooner, on the labels?  
     assert pm_indices[1:, 0].all() == pm_indices[:-1, 1].all()
 

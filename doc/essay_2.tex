@@ -51,6 +51,12 @@
 \end{flushright}
 }
 
+%%% Adjust test size & formatting in marginpar
+\long\def\@ympar#1{%
+  \@savemarbox\@marbox{\tiny #1}%
+  \global\setbox\@currbox\copy\@marbox
+  \@xympar}
+
 %----------------------------------------------------------------------------------------
 %	TITLE
 %----------------------------------------------------------------------------------------
@@ -61,7 +67,7 @@
 %Focused and Deliciously Witty Subtitle} % Subtitle
 
 
-\author{\textsc{Oliver Watts} % Author
+\author{\textsc{Oliver Watts \& C\'{a}ssia Valentini-Botinh\~{a}o } % Author
 %\\{\textit{Interstellar University}}
 } % Institution
 
