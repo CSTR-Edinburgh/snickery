@@ -1,4 +1,4 @@
-FORMAT=essay_2  # wrapper 
+FORMAT=snickery_overview  # wrapper 
 
 rm -f $FORMAT.blg $FORMAT.log $FORMAT.aux $FORMAT.cb $FORMAT.pdf $FORMAT.bbl $FORMAT.cb2
 
