@@ -2,9 +2,9 @@
 
 \section{Overview}
 
-This document describes the {\tt snickery} toolkit for \textit{hybrid speech synthesis}. By \textit{hybrid}, we mean that waveforms are produced by waveform unit selection and concatenation, but that the selection is guided by the output of a high quality acoustic model. Typically, the acoustic features used to guide selection could themselves be passed through a vocoder to produce a stable, intelligible and reasonably natural-sounding waveform. 
+This document describes the {\tt snickery} toolkit for hybrid speech synthesis. By \textit{hybrid}, we mean that waveforms are produced by waveform unit selection and concatenation, but that the selection is guided by the output of a high quality acoustic model. Typically, the acoustic features used to guide selection could themselves be passed through a vocoder to produce a stable, intelligible and reasonably natural-sounding waveform. 
 
-The basic unit currently used is the half-phone, although it would be fairly trivial to restrict selection to diphone units (i.e.\ to only allow concatenation in the middle of a phone). We have also experimented with the selection of smaller units of speech, although the stable toolkit does not currently support this.
+The basic unit currently used is the halfphone, although it would be fairly trivial to restrict selection to diphone units (i.e.\ to only allow concatenation in the middle of a phone). We have also experimented with the selection of smaller units of speech, although the stable toolkit does not currently support this.
 
 The toolkit contains some scripts for the extraction of acoustic features from speech waveforms, but contains nothing to produce phonetic alignments or labels for a database, or to train or generate from the model which is used to guide selection. The toolkit mainly works under the assumption that all these resources are available, and focuses on the problem of unit selection, given these resources. 
 
@@ -19,11 +19,10 @@ The toolkit contains some scripts for the extraction of acoustic features from s
     \item A \textit{target representation} of the unit, which can be used to score its distance from any given target unit  % train_unit_features
     \item A \textit{join representation} of both the start and end of the unit, which can be used to score how well the unit can be joined (to the left or the right) with other units in the database. % join_contexts
     \item The name of the waveform file where its time-domain representation is stored % filenames
-    \item The waveform samples corresponding to the GCIs regarded as the start and endpoint of the unit's time-domain representation, and where it will be joined with other units % cutpoints
+    \item The waveform sample indices corresponding to the glottal closure instances (GCIs) at the start- and end-points of the unit's time-domain representation % cutpoints
 \end{itemize}
 
-We also record the means and standard deviations used to standardise both the target and join representations. The target representation statistics will be used to standardise incoming acoustic predictions at synthesis-time in a comparable way. (For the purposes of synthesis, there is no need to store join representation statistics as we do.) 
-
+We also record the means and standard deviations used to standardise both the target and join representations. The target representation statistics will be used to standardise incoming acoustic predictions at synthesis-time in a comparable way.\footnote{For the purposes of synthesis, there is no need to store join representation statistics as we in fact do.}
 
 % <HDF5 dataset "cutpoints": shape (1870, 2), type "<i4">
 % <HDF5 dataset "filenames": shape (1870,), type "|S50">
@@ -44,107 +43,136 @@ It is assumed that quinphone features can be extracted from the label files prov
 {\tt d/v/E\_L/n/tS } %% E_L v/E_L v/E_L/n
 \end{quotation}
 
-Note that {\tt \_L} is appended to the phone symbol {\tt E} to mark the fact that 
+\noindent The {\tt \_L} is appended to the phone symbol {\tt E} to mark the fact that this is the first of the two halfphones, or \textbf{l}eft halfphone. Given this representation, the following related representations can be obtained:
 
-....
+\begin{description}
+    \item[triphone: ] {\tt v/E\_L/n}
+    \item[diphone: ] {\tt v/E\_L}
+    \item[monophone: ] {\tt E\_L}
+\end{description}
+
+\noindent Note that the left context is used for the diphone representation as {\tt E\_L} is the left halfphone; in the case of the right halfphone {\tt d/v/E\_R/n/tS}, the corresponding diphone representation would incorporated instead the right-hand context ({\tt E\_R/n}).
+    
+
 
 \subsubsection{Target representation}
-Typically, several `streams' of acoustic features will be used to build the target representation for a halfphone, the data for each stream and each utterance contained in its own file. For the target features, these features are expected to be fixed frame-rate: i.e.\ there should be 1 vector for each 5msec (typically) of the duration of the sentence as given in the label file. The separate streams' features for each sentence are first concatenated and standardised, giving an array containing values for every frame (typically 5 msec) of speech. Unit selection is done halfphone-by-halfphone rather than frame-by-frame, so frame-level predictions are first mapped to halfphone-level representations. There are many ways this could be done: the toolkit uses non-uniform resampling in time to obtain halfphone representations of fixed-size. Sampling can be done to 1, 2 or 3 points in the halfphone.\footnote{By non-uniform, we mean e.g.\ that in the 3-point case, the middle point is not necessarily equidistant between start and end points. Rather, its position is chosen in relation to the state alignment, in the expectation that this will provide a more acoustically meaningful point of reference than simply choosing the central point without regard to subphone alignment.} The resulting representation can then be compared with representations of units in the database, which have been obtained in the same way by resampling.\footnote{Note that there is no reason a statistical model should not predict these unit-level representations directly, which would lead to more efficient training and to not having to resample. We use frame-level predictions simply because they allow us to experiment easily with different halfphone representations without having to retrain a predictor for each possible configuration.}
+Typically, several `streams' of acoustic features will be used to build the target representation for a halfphone, the data for each stream and each sentence contained in its own file. For the target cost streams, these features are expected to be of fixed frame-rate: there should be 1 vector for each (typically) 5msec of the duration of the sentence as given in the label file. The separate streams' features for each sentence are first concatenated and standardised, giving an array containing values for every frame of speech. Unit selection is done halfphone-by-halfphone rather than frame-by-frame, so features specified at the frame-rate are first mapped to representations at the rate of the halfphone. There are many ways this could be done: the toolkit uses non-uniform resampling in time to obtain halfphone representations of fixed size. Resampling can be done to 1, 2 or 3 points in the halfphone.\footnote{By non-uniform, we mean e.g.\ that in the 3-point case, the middle point is not necessarily equidistant between start and end points. Rather, its position is chosen in relation to the state alignment, in the expectation that this will provide a more acoustically meaningful point of reference than simply choosing the central point without regard to subphone alignment.} At run-time, the resulting representations can be compared with representations obtained in the same way from the guiding model's predictions.\footnote{Note that there is no reason a statistical model should not predict these unit-level representations directly, which would lead to more efficient training (due to fewer observations) and synthesis (due to not having to resample). We use frame-level predictions because they allow us to experiment easily with different halfphone representations without having to retrain a predictor for each possible configuration.}
 
-One option is to build target representations for a database using features extracted from natural speech. A problem with this is that the representations with which these are compared at synthesis time are by necessity not based on natural speech but on noisy predictions. To reduced this mismatch, the approach we use is to resynthesise the training data for our corpus using the statistical model trained on it, but using the durations extracted from natural speech. The resulting features will exhibit some of the imperfections of runtime predictions, and basing our target representations on these is expected to reduce mismatch.\footnote{Simply change directory names in configuration file -- toolkit is agnostic about the origin of any feature stream, as long as its dimensions match the label.}
+One option is to build target representations for a database using features extracted from natural speech. A problem with this is that the representations with which these are compared at synthesis time are by necessity not based on natural speech but on noisy predictions. To reduced this mismatch, the approach we use is to resynthesise the training data for our corpus using the statistical model trained on it, but using the durations extracted from natural speech. The resulting features will exhibit some of the imperfections of runtime predictions, and basing our target representations on these is expected to reduce the mismatch.\footnote{The toolkit is agnostic about the origin of any feature stream -- natural features can be switched for synthesised ones simply by changing directory names in the configuration file used.}
 
 
 \subsubsection{Join representation}
 
-The features used for the join representation are expected to be pitch-synchronous, i.e.\ there should be one vector per GCI in the corresponding pitchmark file. The features could have been extracted in a pitch-synchronous way, or fixed framerate features could have been resampled by interpolation to pitchmarks (script given for this).
+The features used for the join representation are expected to be pitch-synchronous, i.e.\ there should be one vector per GCI in the corresponding pitchmark file. The features could have been extracted in a pitch-synchronous way, or fixed framerate features could have been resampled by interpolation to pitchmarks.\footnote{The script {\tt script\_data/ps\_resample.py} can be used to perform such `pitch synchronisation'.}
 
-Separates streams are joined and concatenated as for the target features. 
-
-The waveform for a given halfphone starts and ends on GCIs. The start and end join representations of the unit are the join vectors centred on these pitchmarks.
-
-The waveform sample regarded as the end of unit $t$ in the database will also be regarded as the start of naturally contiguous unit $t+1$.  Note that to reduce storage required, we therefore deduplicate, and store $n+1$ join  vectors for a database with $n$ units instead of $2n$. 
+In training, the separate streams are combined as was done with the target cost features. As noted above, the section of waveform associated with a given halfphone both starts and ends on a GCI. The start and end join representations of the unit are the join vectors associated with these pitchmarks.
+The waveform sample regarded as the end of unit $t$ in the database will also be regarded as the start of naturally contiguous unit $t+1$.  Note that to reduce storage required, we therefore deduplicate, and store $n+1$ join  vectors for a database with $n$ units instead of $2n$.\footnote{For simplicity, this is even the case where units $t$ and $t+1$ are from different sentence and therefore not naturally contiguous. However, if we assume that sentences all end and begin with silence, this presents no practical problem.}
 
 
 \subsection{Synthesis time}
 
 \subsubsection{Acoustic target creation}
 Input at synthesis time consists of a label file containing predicted timings and phonetic identities and predicted acoustic features which are used to create acoustic `targets' for unit selection.
-Concatenation and normalisation is done as in training, using means and standard deviations computed on the training corpus. The halfphones are then resampled in time to a fixed length, consistent with the representations of units in the training database.
+Concatenation and normalisation of streams is done as in training, using means and standard deviations computed on the training corpus. The halfphones are then resampled in time to a fixed length, consistent with the representations of units in the training database.
 
 \subsubsection{Unit preselection}
 We limit the search space by considering a limited number of candidates at each time step.
 \marginpar{Default: 30}
 These can be selected based on acoustic distance to the target unit representations, or by filtering according to phonetic type. 
 \marginpar{ {\tt preselection\_method $=$ 'quinphone'}}
-In the latter case we use \textit{quinphone selection}: we first take all units from the database whose quinphone context matches that of the target unit, if any, then do the same for successively more limited contexts: triphone, diphone, and context-independent halfphone, until the desired number of candidates has been selected. In the case of diphone, the direction of context considered depends on whether the target to be matched is the left or right half of a phone. We assume that no new phones will be seen at run time and so that this procedure will never return an empty array.\footnote{As an emergency backoff, we add a single instance of a halfphone of silence.}
+In the latter case we use \textit{quinphone selection}: we first take all units from the database whose quinphone context matches that of the target unit, if any, then do the same for successively more limited contexts: triphone, diphone, and context-independent halfphone, until the desired number of candidates has been selected. In the case of diphone, the direction of context considered depends on whether the target to be matched is the left or right half of a phone. We assume that no new phones will be seen at run time and so that this procedure will never return an empty array.\footnote{As an emergency backoff in the case that this array \textit{is} empty, we populate it with a single instance of a halfphone of silence.}
 
-In published system descriptions, this type of preselection by phonetic type is often motivated the need for efficiency. However, anecdotal evidence and our own experience suggests that the use of phonetic criteria in preselection is vital to get decent results. Preselection using acoustic-only criteria results in obviously worse speech, which demonstrates the mismatch between acoustic representations and perceptually-relevant ones. 
+In published system descriptions, this type of preselection by phonetic type is often motivated the need for efficiency. However, anecdotal evidence and our own experience suggests that the use of phonetic criteria in preselection is vital to get decent quality. Preselection using acoustic-only criteria results in obviously worse speech, which demonstrates the mismatch between acoustic representations and perceptually-relevant ones. 
 
-Quinphone and acoustic preselection can be combined: e.g.\ select 1000 units by quinphone criteria, then take 30 acoustically closest units (\textbf{TODO: implement this}).
+Quinphone and acoustic preselection can be combined. For example, we can select 500 units by the quinphone criteria, then of these take the 30 acoustically closest units to the target representation (\textbf{TODO: implement this}).
 
 \subsubsection{Unit selection}
-The goal of unit selection is to select a sequence of units under two types of contraint: that each unit should be acoustically close to its target (target cost), and that the end of each unit in the sequence should be acoustically similar to the start of the following unit, so that they can be joined without audible artefacts (join cost).
-We treat this as a weighted finite-state transducer problem: the target cost is imposed by WFST $bm{T}$ and the join cost by $bm{J}$.
+The goal of unit selection is to select a sequence of units under two types of constraint: that each unit should be acoustically close to its target (divergence is penalised with a \textit{target cost}), and that the end of each unit in the sequence should be acoustically similar to the start of the following unit, so that they can be joined without audible artefacts (implemented with a \textit{join cost}).
+We treat this as a weighted finite-state transducer problem: the target cost is imposed by WFST $\bm{T}$ and the join cost by $\bm{J}$. The composition of these produces a WFST whose productions are constrained by both types of cost. The least-penalised path through it is found, corresponding to a sequence of units from the database, whose associated waveform fragments can then be concatenated.
 
-join cost is given by...
+Target and join costs are (in effect weighted) Euclidean distances between target and join representations, respectively (for more on weighting, see Section \ref{weighting_section}).
+
+\color{red}
 
 \textbf{TODO: add pictures of example lattices}
 
 T: `sausage lattice'
 
-J can be made on-the-fly, or can be cached for the whole database.
+\color{black}
 
- Composition of these produces a WFST whose productions are constrained by both types of cost. The least-penalised path through it is found, corresponding to a sequence of units from the database.
+Note that $\bm{T}$ is created on-the-fly for each sentence to be synthesised. $\bm{J}$ can be made on-the-fly for each sentence, or can be cached for the whole database.
 
-
+ 
 \subsubsection{Waveform synthesis}
 
 There are two possibilities for waveform synthesis:
 
 \begin{description}
-    \item[Time-domain overlap and add] Units are concatenated by overlapping on their terminal glottal closure instances, and cross-faded with a Hanning window (length: )
-    \item[Magphase overlap add] Add description of Felipe's stuff here after adding it to the implementation.
+    \item[Time-domain overlap and add] Units are concatenated by overlapping on their terminal glottal closure instances (GCIs), and cross-faded with a Hanning window (length: )
+    \item[Magphase overlap add] \color{red} Add description of Felipe's stuff here after adding it to the implementation. \color{black}
 \end{description}
 
 
 
-\section{Standardisation}
+\section{Treatment of acoustic streams} 
 
-Streams of features for both the target and join costs are standardised as follows. Means are computed per coefficient so that the standardised values will all have zero mean, but a single standard deviation value is used to scale all coefficients in each stream. The motivation for this is that we assume stream features that we are using have been designed in such a way that the relative dynamic range of coefficients is proportional to their relative perceptual importance, and we wish to preserve these difference of range in the standardised values. Unvoiced frames of F0 are ignored when computing means and standard deviations. Unvoiced values are also treated specially when streams are standardised -- they are assigned a negative value whose magnitude is given by multiplying the F0 feature's standard deviation by a constant factor (20). The motivation here is ... (cf. Rob)
+More details are here given of the treatment of acoustic streams, for both target and join costs. 
 
-Check code!
+\subsection{Standardisation}\label{standardisation_section}
 
-\section{Weighting}
-Weight features rather than difference terms.
+When a stream of features is standardised, means over the whole database are computed per coefficient so that the standardised values will all have zero mean, but a single standard deviation value is used to scale all coefficients in each stream. This is motivated by the assumption that each of the streams we have chosen to use has been designed in such a way that the relative dynamic range of coefficients in a stream is proportional to their relative perceptual importance, and we wish to preserve these difference of range in the standardised values. 
 
+Unvoiced frames of $F_0$ and $log F_0$ are ignored when computing means and standard deviations. Unvoiced values are also treated specially when streams are standardised -- they are assigned a negative value whose magnitude is given by multiplying the feature's standard deviation by a constant factor (set to 20). The motivation here, following \cite{clark-2007} is that we wish to:
+\begin{enumerate}
+    \item penalise differences between voiced values in the normal way
+    \item put no $F_0$ penality on comparisons between unvoiced features
+    \item put a large penality on comparisons between voiced and unvoiced features
+\end{enumerate}
+%As the voiced frames of a standardised $F_0$ stream will have a mean of 0, 
+The approach described accomplished all of these goals.
 
-\section{Join cost}
+\subsection{Weighting}\label{weighting_section}
+Features' contributions to both target and join costs can be modified by weighting. Weights are applied stream-by-stream rather than coefficient-by-coefficient. This is both to reduce the number of parameters which must be manually adjusted, and also follows the logic outlined in Section \ref{standardisation_section}: we expect streams to have been engineered in such a way that the component coefficients' relative dynamic ranges (and therefore their contribution to a Euclidean distance) reflect relative perceptual importance.
 
-Join cost features are pitch synchronised. Each unit is characterised by 2 join vectors: one centred on the GCI upon which the unit starts, and one centred on the GCI on which it ends. Initial and final GCIs of units are determined such that the final GCI of unit $t$ in the database is the same as the initial GCI of the unit which naturally follows it in the database, at $t+1$.
-
-Join cost is Euclidean distance of relevant join vectors:
+The weighted Euclidean distance between 2 $n$-dimensional feature vectors $\bm{a}$ and $\bm{b}$ is generally given as:
 
 \begin{equation}
-\sqrt{\sum_{i=1}^{n}(q_i - p_i)^{2}}
+\sqrt{\sum_{i=1}^{n}\bm{w}_{i}(\bm{a}_i - \bm{b}_i)^{2}} 
 \end{equation}
 
-Design of units means naturally adjacent units have 0 join cost, with no hack necessary.
+\noindent where the weights are applied to the squared-difference terms. An equivalent formulation is to apply a set of appropriately transformed weights to the features themselves:
 
 
+\begin{equation}
+\sqrt{\sum_{i=1}^{n}\bm{w}_{i}(\bm{a}_i - \bm{b}_i)^{2}} = \sqrt{\sum_{i=1}^{n}(\sqrt{\bm{w}_{i}}\bm{a}_i - \sqrt{\bm{w}_{i}}\bm{b}_i)^{2}}
+\end{equation}
+
+\noindent It is this second formulation which is used by the toolkit.  Features are weighted upon loading, and subsequently all join and target cost calculations are performed with the plain Euclidean distance, with no explicit weighting. As well as being marginally more efficient, this enables the use of e.g.\ off-the-shelf KD-tree implementations which do not support weighted Euclidean distance. Note that stream weights as specified in a configuration file correspond to $\sqrt{\bm{w}}$ rather than to $\bm{w}$; i.e.\ the weights will be used directly as given to scale the corresponding feature stream.
 
 
-\section{Weight balancing}
+\subsection{Weight balancing}
 
-Our initial assumption when building a voice is that all streams within both the join and target subcosts
-should on average contribute equally to the selection of units by that subcost; we also assume that 
-target cost and join cost should contribute equally to the total cost. 
-Contributions from streams are adjusted by directly weighting the coefficients of the streams (rather than
-e.g. squared difference terms in the error function) as described above.
-Choosing stream weights so that the streams contribute in this balanced way is not trivial, as the problem
+The stream weights specified in a configuration file can be manually adjusted by trial and error. Weighting is performed when the database is loaded for synthesis, so a different choice of weights does not require retraining. The relative contributions of target and join costs to the combined cost of selecting a unit sequence can be adjusted either by changing the separate stream weights, or by adjusting {\tt join\_cost\_weight}, which scales the combined join-cost weights.
+
+A useful starting place when building a voice, before evidence to the contrary is available, is to assume that the target and join subcosts should on average contribute equally to total selection costs, and also that all streams used within each of the two subcosts should contribute on average equally to that subcost.
+Whilst it is obvious that increasing the weight of a stream will on average increase its contribution to unit selection cost, choosing stream weights so that the streams contribute in this balanced way is not trivial, as the problem
 is circular: given the results of some search, we can compute the contribution of stream costs to the
-total path cost, and the necessary scaling to balance their contribution, but the search must itself be based on an initial weighting. (Alternative approaches -- such as considering all candidate paths through a search lattice equally likely -- might lead to a simpler solution, but this solution will consider possibly extremely bad paths.) We therefore use an iterative approach to setting the weights, as follows:
+total path cost, and the necessary scaling to balance their contribution, but the search must itself be based on an initial weighting. (Alternative approaches -- such as considering all candidate paths through a search lattice equally likely -- might lead to a simpler solution, but this solution will consider possibly extremely bad paths.) We therefore use an iterative approach to setting the weights, where weights are adjusted based on the RPROP learning procedures, based on the average cost per stream of synthesising some held-out material. Only labels and predicted acoustic features are required for this optimisation -- no natural acoustics are needed, and so the set can be as large as desired, although we have found that validating weights found on 100 new sentences give almost identical stream-contributions when validated on another 100 new sentences. The script {\tt balance\_stream\_weights.py} performs this optimisation and prints weights to the terminal, which can then be pasted into configuration files for performing synthesis.
 
-...
+\color{red}More detail. Mention that 0 scores are removed before average stream contribution is computed, which affects join streams more, and especially $F_0$ for join.\color{black}
 
+\subsection{Target and join cost}
 
+\color{red}Where to put this bit?\color{black}
+Notes on cost computation -- plain Euclidean distance with no explicit weighting. Note `natural' aspect of join cost -- zero for naturally contiguous units.
+
+% Join cost features are pitch synchronised. Each unit is characterised by 2 join vectors: one centred on the GCI upon which the unit starts, and one centred on the GCI on which it ends. Initial and final GCIs of units are determined such that the final GCI of unit $t$ in the database is the same as the initial GCI of the unit which naturally follows it in the database, at $t+1$.
+
+% Join cost is Euclidean distance of relevant join vectors:
+
+% \begin{equation}
+% \sqrt{\sum_{i=1}^{n}(q_i - p_i)^{2}}
+% \end{equation}
+
+% Design of units means naturally adjacent units have 0 join cost, with no hack necessary.
 
