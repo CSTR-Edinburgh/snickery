@@ -18,7 +18,45 @@ from keras.callbacks import EarlyStopping
 from synth_halfphone import Synthesiser
 from train_halfphone import get_data_dump_name
 
+from util import cartesian
+
 class JoinDatabaseForActiveLearning(Synthesiser):
+
+
+    def train_classifier(self, data, labels, max_epoch=30):
+
+        mu,sig = (data.mean(axis=0), data.std(axis=0))
+        mu = mu.reshape((1,-1))
+        sig = sig.reshape((1,-1))
+
+        data = (data - mu) / sig
+
+        m,n = data.shape
+        outsize = int(np.max(labels)+1)
+        model = Sequential()
+
+        model.add(Dense(units=512, input_dim=n))
+        model.add(Activation('relu'))
+        model.add(Dense(units=512))
+        model.add(Activation('relu'))
+        model.add(Dense(units=512))
+        model.add(Activation('relu'))
+
+        model.add(Dense(units=outsize))
+        model.add(Activation('softmax'))
+
+        model.compile(loss='sparse_categorical_crossentropy', optimizer='adam')
+
+        earlyStopping = EarlyStopping(monitor='val_loss', patience=5, verbose=1, mode='min')
+
+        model.fit(data, labels, epochs=max_epoch, batch_size=64, callbacks=[earlyStopping], validation_split=0.10, shuffle=True)
+
+        self.classifier = model
+
+        ## TODO: save model to disk        
+
+
+
     def __init__(self, config_file):
         super(JoinDatabaseForActiveLearning, self).__init__(config_file)
         
@@ -33,11 +71,62 @@ class JoinDatabaseForActiveLearning(Synthesiser):
         self.end_join_feats = f["end_join_feats"][:,:]    
         f.close()
 
-        self.setup_join_database(join_data_sql_fname)  # creates self.connection & self.cursor
+        ## find positive sample:
+        positive_sample_pool = []        
+        for fro in xrange(self.number_of_units-1):
+            to = fro + 1
+            if self.train_filenames[fro] == self.train_filenames[to]:
+                positive_sample_pool.append((fro, to))
+
+        ## find negative sample:
+        self.mode_of_operation = 'find_join_candidates'
+        flist = self.get_sentence_set('tune')[:10]
+        all_candidates = [self.synth_utt(fname, synth_type='tune') for fname in flist]
+        negative_sample_pool = {}
+        for candidates in all_candidates:
+            m,n = candidates.shape
+            for i in xrange(m-1):
+                for fro in candidates[i,:]:
+                    for to in candidates[i+1,:]:
+                        if fro != to+1 and fro >= 0 and to >= 0:
+                            negative_sample_pool[(fro, to)] = 0
+
+        negative_sample_pool = negative_sample_pool.keys()
+        print len(negative_sample_pool)
+        print len(positive_sample_pool)
         
 
+        ### train initial classifier on subset:
+        random.shuffle(positive_sample_pool)
+        random.shuffle(negative_sample_pool)
+
+
+        sample_halfsize = len(positive_sample_pool)
+        negative_samples_subset = negative_sample_pool[:sample_halfsize]
+        ixx = np.array(positive_sample_pool + negative_samples_subset, dtype=int)
+        labels = np.concatenate([np.zeros(sample_halfsize), np.ones(sample_halfsize)])
+        from_ixx = ixx[:,0]
+        to_ixx = ixx[:,1]
+
+        train_examples = np.hstack([self.end_join_feats[from_ixx,:], self.start_join_feats[to_ixx,:]])
+        self.train_classifier(train_examples, labels)
+
+
+
+
+        sys.exit('wevwrv')
+
+
+
+
+
+
+
+
+        self.setup_join_database(join_data_sql_fname)  # creates self.connection & self.cursor
+        
         ## get seed set:
-        nseed = 3
+        nseed = 20
         self.cursor.execute("SELECT from_index, to_index FROM transitions ORDER BY RANDOM() LIMIT %s"%(nseed)) 
         seedset = self.cursor.fetchall()
 

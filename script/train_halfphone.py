@@ -292,9 +292,6 @@ def main_work(config, overwrite_existing_data=False):
         ## Get representations of half phones to use in target cost:-
         unit_names, unit_features, timings = get_halfphone_stats(t_speech, labs, config.get('target_representation', 'twopoint'))
 
-        if config['dump_join_data']:
-            start_join_feats, end_join_feats = get_join_data_AL(j_speech, timings, config['join_cost_halfwidth'])
-
         ## Find 'cutpoints': pitchmarks which are considered to be the boudnaries of units, and where those
         ## units will be concatenated:
         cutpoints, cutpoint_indices = get_cutpoints(timings, pms_seconds)
@@ -307,6 +304,9 @@ def main_work(config, overwrite_existing_data=False):
         m,n = unit_features.shape
         o,p = context_data.shape
         assert o == m+1
+
+        if config['dump_join_data']:
+            start_join_feats, end_join_feats = get_join_data_AL(j_speech, cutpoint_indices, config['join_cost_halfwidth'])
 
         ## Add everything to database:
         train_dset[start:start+m, :] = unit_features
@@ -876,55 +876,97 @@ def get_contexts_for_natural_joincost(speech, timings, width=2):
 
 
 
-def get_join_data_AL(speech, timings, halfwidth):
+def get_join_data_AL(speech, pm_indices, halfwidth):
     '''
-    Output of this operation is not yet used -- it will be used for actively learned join cost
+    Newer version: pitch synchronous features.
+    Output of this operation can be used by later scripts for actively learning a join cost.
+
+    pm_indices: start and end indices of pitchmarks considered to be unit cutpoints: 
+        [[  0   1]
+         [  1   5]
+         [  5  12]
+         [ 12  17] ...
+    Because speech features used for join cost are expected to be already pitch synchronous or 
+    synchronised, we can index rows of speech directly with these.
     '''
+    # enforce that t end is same as t+1 start -- TODO: do this check sooner, on the labels?  
+    assert pm_indices[1:, 0].all() == pm_indices[:-1, 1].all()    
 
-    #print speech
-    #print timings
-    # pylab.plot(speech)
-    # pylab.show()
+    starts = pm_indices[:,0]
+    ends = pm_indices[:,1]
+    start_speech = copy.copy(speech)
+    if starts[-1] + halfwidth > ends[-1]:
+        difference = starts[-1] + halfwidth - ends[-1]
+        padding = speech[-1,:].reshape((1,-1))
+        start_speech = np.vstack([start_speech] +    difference * [padding])
+    start_speech = segment_axis(start_speech, halfwidth, overlap=halfwidth-1, axis=0)
+    start_contexts = start_speech[starts,:,:].reshape((len(starts), -1))
 
-    ## starting parts
-    starts = [s for (s,e) in timings]
-    ## do we need to pad the end of the speech?
-    m,n = speech.shape
-    ##print 'N'
-    ##print n
-    if max(starts) + halfwidth > m:
-        diff = (max(starts) + halfwidth) - m
-        start_speech = np.vstack([speech, np.zeros((diff, n))])
-        debug('correct start')
-    else:
-        start_speech = speech
-    #print start_speech.shape
-    frames = segment_axis(start_speech, halfwidth, overlap=halfwidth-1, axis=0)
-    #print frames.shape
-    start_frames = frames[starts,:,:]
-    #print start_frames.shape
+    end_speech = copy.copy(speech)
+    if ends[0] - (halfwidth+1) < 0:
+        difference = (ends[0] - (halfwidth+1)) * -1
+        padding = speech[0,:].reshape((1,-1))
+        end_speech = np.vstack(difference * [padding] +   [end_speech])
+    ends -= (halfwidth+1)
+    end_speech = segment_axis(end_speech, halfwidth, overlap=halfwidth-1, axis=0)
+    end_contexts = end_speech[ends,:,:].reshape((len(ends), -1))
 
-    ends = np.array([e for (s,e) in timings])
-    ## do we need to pad the start of the speech?
-    if min(ends) - halfwidth < 0:
-        diff = 0 - (min(ends) - halfwidth)
-        end_speech = np.vstack([np.zeros((diff, n)), speech])
-        ends += diff
-        debug('correct end')
-    else:
-        end_speech = speech
-    ends -=  halfwidth ###  to get starting point of end segments
-    frames = segment_axis(end_speech, halfwidth, overlap=halfwidth-1, axis=0)
-    #print frames.shape
-    end_frames = frames[ends,:,:]
+    return (start_contexts, end_contexts)
+
+
+
+
+##### fixed framerate version:
+# def get_join_data_AL(speech, timings, halfwidth):
+#     '''
+#     Output of this operation is not yet used -- it will be used for actively learned join cost
+#     '''
+
+#     print speech
+#     print timings
+#     sys.exit('wefswrb545')
+#     # pylab.plot(speech)
+#     # pylab.show()
+
+#     ## starting parts
+#     starts = [s for (s,e) in timings]
+#     ## do we need to pad the end of the speech?
+#     m,n = speech.shape
+#     ##print 'N'
+#     ##print n
+#     if max(starts) + halfwidth > m:
+#         diff = (max(starts) + halfwidth) - m
+#         start_speech = np.vstack([speech, np.zeros((diff, n))])
+#         debug('correct start')
+#     else:
+#         start_speech = speech
+#     #print start_speech.shape
+#     frames = segment_axis(start_speech, halfwidth, overlap=halfwidth-1, axis=0)
+#     #print frames.shape
+#     start_frames = frames[starts,:,:]
+#     #print start_frames.shape
+
+#     ends = np.array([e for (s,e) in timings])
+#     ## do we need to pad the start of the speech?
+#     if min(ends) - halfwidth < 0:
+#         diff = 0 - (min(ends) - halfwidth)
+#         end_speech = np.vstack([np.zeros((diff, n)), speech])
+#         ends += diff
+#         debug('correct end')
+#     else:
+#         end_speech = speech
+#     ends -=  halfwidth ###  to get starting point of end segments
+#     frames = segment_axis(end_speech, halfwidth, overlap=halfwidth-1, axis=0)
+#     #print frames.shape
+#     end_frames = frames[ends,:,:]
     
-    ## flatten the last 2 dimensions of the data:--
-    #print start_frames.shape
-    #print halfwidth, n
-    start_frames = start_frames.reshape((-1, halfwidth*n))
-    end_frames = end_frames.reshape((-1, halfwidth*n))
+#     ## flatten the last 2 dimensions of the data:--
+#     #print start_frames.shape
+#     #print halfwidth, n
+#     start_frames = start_frames.reshape((-1, halfwidth*n))
+#     end_frames = end_frames.reshape((-1, halfwidth*n))
 
-    return (start_frames, end_frames)
+#     return (start_frames, end_frames)
 
 
 
