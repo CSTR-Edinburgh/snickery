@@ -811,6 +811,12 @@ def get_facts(vals):
         else:
             sys.exit('preselection_method unknown')
 
+        if self.mode_of_operation == 'find_join_candidates':
+            print 'mode_of_operation == find_join_candidates: return here'
+            ## TODO: shuffle above operations so we can return this before looking at target features
+            return candidates          
+
+
         start_time = self.start_clock('Make target FST')
         T = make_target_sausage_lattice(distances, candidates)        
         self.stop_clock(start_time)          
