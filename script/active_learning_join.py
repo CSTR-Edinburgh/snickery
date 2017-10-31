@@ -80,7 +80,7 @@ class JoinDatabaseForActiveLearning(Synthesiser):
 
         ## find negative sample:
         self.mode_of_operation = 'find_join_candidates'
-        flist = self.get_sentence_set('tune')[:10]
+        flist = self.get_sentence_set('tune')
         all_candidates = [self.synth_utt(fname, synth_type='tune') for fname in flist]
         negative_sample_pool = {}
         for candidates in all_candidates:

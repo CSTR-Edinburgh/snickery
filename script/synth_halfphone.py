@@ -100,6 +100,16 @@ class Synthesiser(object):
             sys.exit('data: \n   %s   \ndoes not exist -- try other?'%(datafile))
             
         f = h5py.File(datafile, "r")
+
+        print 
+        print 'Database file: %s'%(datafile)
+        print 
+        print 'Loading hybrid voice data:'
+        for thing in f.values():
+            print thing
+        print
+
+
         self.train_unit_features_unweighted = f["train_unit_features"][:,:]
         self.train_unit_names = f["train_unit_names"][:] 
         self.train_cutpoints = f["cutpoints"][:] 
