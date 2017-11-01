@@ -18,7 +18,7 @@ import numpy as np
 from train_halfphone import get_data_dump_name
 from synth_halfphone import Synthesiser
 
-import pylab
+# import pylab
 
 
 

@@ -9,7 +9,7 @@ import shelve
 import sqlite3
 import random
 
-import pylab
+# import pylab
 
 from keras.layers import Dense, Activation
 from keras.models import Sequential
@@ -23,35 +23,46 @@ from util import cartesian
 class JoinDatabaseForActiveLearning(Synthesiser):
 
 
-    def train_classifier(self, data, labels, max_epoch=30):
+    def train_classifier(self, data, labels, architecture=[512,512,512], activation='relu', batch_size=64, max_epoch=30, patience=5):
 
-        mu,sig = (data.mean(axis=0), data.std(axis=0))
-        mu = mu.reshape((1,-1))
-        sig = sig.reshape((1,-1))
+        # print data[:1,:]
+        # mu,sig = (data.mean(axis=0), data.std(axis=0))
+        # mu = mu.reshape((1,-1))
+        # sig = sig.reshape((1,-1))
+        # data = (data - mu) / sig
+        # print data[:1,:]
 
-        data = (data - mu) / sig
+        ## handle large negative values (unvoiced markers): TODO: fix this temporary hack!
+        min_normal = data[data>-500.0].min()
+        data[data<-500.0] = min_normal - 0.1
+
 
         m,n = data.shape
         outsize = int(np.max(labels)+1)
+
         model = Sequential()
 
-        model.add(Dense(units=512, input_dim=n))
-        model.add(Activation('relu'))
-        model.add(Dense(units=512))
-        model.add(Activation('relu'))
-        model.add(Dense(units=512))
-        model.add(Activation('relu'))
+        layer_size = architecture[0]
+        model.add(Dense(units=layer_size, input_dim=n))
+        model.add(Activation(activation))
+
+        for layer_size in architecture[1:]:
+            model.add(Dense(units=layer_size))
+            model.add(Activation(activation))
 
         model.add(Dense(units=outsize))
         model.add(Activation('softmax'))
 
         model.compile(loss='sparse_categorical_crossentropy', optimizer='adam')
 
-        earlyStopping = EarlyStopping(monitor='val_loss', patience=5, verbose=1, mode='min')
+        earlyStopping = EarlyStopping(monitor='val_loss', patience=patience, verbose=1, mode='min')
 
-        model.fit(data, labels, epochs=max_epoch, batch_size=64, callbacks=[earlyStopping], validation_split=0.10, shuffle=True)
+        model.fit(data, labels, epochs=max_epoch, batch_size=batch_size, callbacks=[earlyStopping], validation_split=0.10, shuffle=True)
 
         self.classifier = model
+
+        predictions = model.predict(data)
+        print predictions.tolist()
 
         ## TODO: save model to disk        
 
@@ -80,7 +91,7 @@ class JoinDatabaseForActiveLearning(Synthesiser):
 
         ## find negative sample:
         self.mode_of_operation = 'find_join_candidates'
-        flist = self.get_sentence_set('tune')
+        flist = self.get_sentence_set('tune') # [:20]
         all_candidates = [self.synth_utt(fname, synth_type='tune') for fname in flist]
         negative_sample_pool = {}
         for candidates in all_candidates:
@@ -101,17 +112,19 @@ class JoinDatabaseForActiveLearning(Synthesiser):
         random.shuffle(negative_sample_pool)
 
 
+        #sample_halfsize = 100  # default: len(positive_sample_pool)
         sample_halfsize = len(positive_sample_pool)
+        positive_samples_subset = negative_sample_pool[:sample_halfsize]
         negative_samples_subset = negative_sample_pool[:sample_halfsize]
-        ixx = np.array(positive_sample_pool + negative_samples_subset, dtype=int)
+        ixx = np.array(positive_samples_subset + negative_samples_subset, dtype=int)
         labels = np.concatenate([np.zeros(sample_halfsize), np.ones(sample_halfsize)])
         from_ixx = ixx[:,0]
         to_ixx = ixx[:,1]
 
         train_examples = np.hstack([self.end_join_feats[from_ixx,:], self.start_join_feats[to_ixx,:]])
-        self.train_classifier(train_examples, labels)
+        self.train_classifier(train_examples, labels, max_epoch=3, batch_size=1024)
 
-
+        # self.classifier.predict()
 
 
         sys.exit('wevwrv')
