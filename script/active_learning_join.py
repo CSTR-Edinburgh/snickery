@@ -62,7 +62,9 @@ class JoinDatabaseForActiveLearning(Synthesiser):
         self.classifier = model
 
         predictions = model.predict(data)
-        print predictions.tolist()
+        
+        np.save('/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/temp/scores', predictions[:,0])
+
 
         ## TODO: save model to disk        
 
@@ -82,6 +84,7 @@ class JoinDatabaseForActiveLearning(Synthesiser):
         self.end_join_feats = f["end_join_feats"][:,:]    
         f.close()
 
+        '''
         ## find positive sample:
         positive_sample_pool = []        
         for fro in xrange(self.number_of_units-1):
@@ -91,7 +94,7 @@ class JoinDatabaseForActiveLearning(Synthesiser):
 
         ## find negative sample:
         self.mode_of_operation = 'find_join_candidates'
-        flist = self.get_sentence_set('tune') # [:20]
+        flist = self.get_sentence_set('tune') #[:20]
         all_candidates = [self.synth_utt(fname, synth_type='tune') for fname in flist]
         negative_sample_pool = {}
         for candidates in all_candidates:
@@ -114,15 +117,42 @@ class JoinDatabaseForActiveLearning(Synthesiser):
 
         #sample_halfsize = 100  # default: len(positive_sample_pool)
         sample_halfsize = len(positive_sample_pool)
-        positive_samples_subset = negative_sample_pool[:sample_halfsize]
+        positive_samples_subset = positive_sample_pool[:sample_halfsize]
         negative_samples_subset = negative_sample_pool[:sample_halfsize]
         ixx = np.array(positive_samples_subset + negative_samples_subset, dtype=int)
         labels = np.concatenate([np.zeros(sample_halfsize), np.ones(sample_halfsize)])
         from_ixx = ixx[:,0]
         to_ixx = ixx[:,1]
 
+
         train_examples = np.hstack([self.end_join_feats[from_ixx,:], self.start_join_feats[to_ixx,:]])
-        self.train_classifier(train_examples, labels, max_epoch=3, batch_size=1024)
+        self.train_classifier(train_examples, labels, architecture=[1024,1024,1024,1024,1024,1024], max_epoch=30, batch_size=512)
+        np.save('/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/temp/ixx', ixx)
+        '''
+        import pylab
+
+        ixx = np.load('/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/temp/ixx.npy')
+        scores = np.load('/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/temp/scores.npy')
+
+
+
+        scores = zip(scores, ixx.tolist())
+        # print scores
+        negscores = scores[(len(scores)/2):]
+        negscores.sort()
+        # pylab.plot(negscores)
+        # pylab.show()
+        #print negscores
+
+        ### synthesise joins at 100 points along whole negative scale:
+        to_synth = np.linspace(0, len(negscores), 100, dtype=int)
+
+        for ix in to_synth:
+            print ix
+            score, (fro, to) = negscores[ix]
+            name = 'aaa_' + str(ix).zfill(20) + '-' + str(score)
+            self.make_join_stimulus(fro, to, context=20, make_natural=False, name_prefix=name)
+
 
         # self.classifier.predict()
 
@@ -224,25 +254,29 @@ class JoinDatabaseForActiveLearning(Synthesiser):
             judgements.append(self.present_audio_instance('/tmp/join_%s_%s.wav'%(fro, to)))
         return judgements
 
+    def make_join_stimulus(self, fro, to, context=20, make_natural=True, name_prefix='join'):
+        start = max(0, fro - context)
+        end = min(self.number_of_units, fro + context + 1)
+        insert_point = context + 1
+        if fro - context < 0:
+            insert_point += fro - context
+            print 'CORRETION!!!!!!!!!! ---------------'
+        unit_sequence = range(start, end)
+        if make_natural:
+            self.concatenate(unit_sequence, '/tmp/%s_%s_%s_nat.wav'%(name_prefix, fro, to))
+        unit_sequence[insert_point] = to
+        print unit_sequence
+        self.concatenate(unit_sequence, '/tmp/%s_%s_%s.wav'%(name_prefix, fro, to))
+
     def present_candidate_joins_single_foreign_unit(self, index_pairs):
         CONTEXT = 20
         judgements = []
         for (fro, to) in index_pairs:
             print fro, to
-            start = max(0, fro - CONTEXT)
-            end = min(self.number_of_units, fro + CONTEXT + 1)
-            insert_point = CONTEXT + 1
-            if fro - CONTEXT < 0:
-                insert_point += fro - CONTEXT
-                print 'CORRETION!!!!!!!!!! ---------------'
-            unit_sequence = range(start, end)
-            self.concatenate(unit_sequence, '/tmp/join_%s_%s_nat.wav'%(fro, to))
-            unit_sequence[insert_point] = to
-            print unit_sequence
-
             print 'try replacing %s with %s'%(self.train_unit_names[fro + 1], self.train_unit_names[to])
-            
-            self.concatenate(unit_sequence, '/tmp/join_%s_%s.wav'%(fro, to))
+            self.make_join_stimulus(fro, to, context=CONTEXT, make_natural=True)
+
+
 
             judgements.append(self.present_audio_instance('/tmp/join_%s_%s.wav'%(fro, to), natural_reference='/tmp/join_%s_%s_nat.wav'%(fro, to)))
         return judgements
