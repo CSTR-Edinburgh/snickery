@@ -11,6 +11,11 @@ import timeit
 import math
 from argparse import ArgumentParser
 
+# Cassia added
+import smoothing.fft_feats as ff
+import smoothing.libwavgen as lwg
+import smoothing.libaudio as la
+
 import numpy as np
 # import scipy
 
@@ -481,10 +486,16 @@ def get_facts(vals):
         # target_weights = vector_to_string(self.config['feature_weights_target'])
         # join_weights = vector_to_string(self.config['feature_weights_join'])
 
+        if self.config['synth_smooth']:
+            smooth='smooth_'
+        else:
+            smooth=''
+
         ##### Current version: weight per stream.
         target_weights = '-'.join([str(val) for val in self.config['target_stream_weights']])
         join_weights = '-'.join([str(val) for val in self.config['join_stream_weights']])
-        name = 'target-%s_join-%s_scale-%s_presel-%s_jmetric-%s_cand-%s_taper-%s'%(
+        name = '%starget-%s_join-%s_scale-%s_presel-%s_jmetric-%s_cand-%s_taper-%s'%(
+                    smooth,
                     target_weights, join_weights, self.config['join_cost_weight'],
                     self.config['preselection_method'],
                     self.config['join_cost_type'],
@@ -865,7 +876,12 @@ def get_facts(vals):
             self.report('' )
         else:
             start_time = self.start_clock('Extract and join units')
-            self.concatenate(best_path, outstem + '.wav')    
+            if self.config['synth_smooth'] :
+                print "Smooth output"
+                self.concatenateMagPhase(best_path, outstem + '.wav')
+            else:
+                print "Does not smooth output"
+                self.concatenate(best_path, outstem + '.wav')
             self.stop_clock(start_time)          
             self.report( 'Output wave: %s.wav'%(outstem ))
             self.report('')
@@ -886,7 +902,7 @@ def get_facts(vals):
 
     def start_clock(self, comment):
         if self.verbose:
-            print '%s... '%(comment),    
+            print '%s... '%(comment),
         return (timeit.default_timer(), comment)
 
     def stop_clock(self, (start_time, comment), width=40):
@@ -1221,11 +1237,24 @@ def get_facts(vals):
         
         taper = self.config['taper_length']
         
+        # Overlap happens at the pitch mark + taper/2 (extend segment by a taper in the end)
+        # if taper > 0:
+        #     end = end + taper
+        #     if end > T:
+        #         pad = np.zeros(end - T)
+        #         wave = np.concatenate([wave, pad])
+
+        # Overlap happens at the pitch mark (extend segment by half taper in each end)
         if taper > 0:
-            end = end + taper
+            end = end + taper/2
             if end > T:
                 pad = np.zeros(end - T)
                 wave = np.concatenate([wave, pad])
+            start = start - taper/2
+            if start < 0:
+                pad   = np.zeros(-start)
+                wave  = np.concatenate([pad, wave])
+                start = 0
                 
         frag = wave[start:end]
         if taper > 0:
@@ -1273,6 +1302,28 @@ def get_facts(vals):
             start += (len(frag) - taper) #+ 1
 
         return wave 
+
+    def concatenateMagPhase(self,path,fname):
+
+        fs     = 48000 # in Hz
+        nfft   = 4096
+
+        pm_reaper_dir = self.config['pm_datadir']
+        wav_dir = self.config['wav_datadir']
+
+        # Initializing fragments
+        frags = {}
+        frags['srcfile'] = []
+        frags['src_strt_sec'] = []
+        frags['src_end_sec'] = []
+        for index in path:
+            (start,end) = self.train_cutpoints[index]
+            frags['srcfile'].append(self.train_filenames[index])
+            frags['src_strt_sec'].append(start / float(fs))
+            frags['src_end_sec'].append(end / float(fs))
+
+        synth_wave = lwg.wavgen_improved_just_slope(frags, wav_dir, pm_reaper_dir, nfft, fs, npm_margin=3, diff_mf_tres=25, f0_trans_nfrms_btwn_voi=8)
+        la.write_audio_file(fname, synth_wave, fs, norm=False)
 
     def get_natural_distance(self, first, second, order=2):
         '''
