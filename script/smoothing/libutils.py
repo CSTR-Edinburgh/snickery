@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sun Jul 24 23:16:51 2016
-
-@author: felipe
+My old personal utilities library
+@author: Felipe Espic
 """
 
 #==============================================================================
