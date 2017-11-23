@@ -1,3 +1,11 @@
+"""
+LibWavGen library shipped with Snickery. 
+Based on an old version of MagPhase Vocoder.
+Description: This library is used for concatenation of units 
+and smoothing of joins for unit selection based TTS systems.
+@author: Felipe Espic
+"""
+
 import os
 from scipy.stats import mode
 from scipy import signal
