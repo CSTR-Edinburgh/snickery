@@ -1,5 +1,5 @@
 """
-Old version of MagPhase vocoder, shipper with the LabWavGen library (Snickery).
+Old version of MagPhase vocoder, shipped with the LibWavGen library (Snickery).
 @author: Felipe Espic
 """
 
