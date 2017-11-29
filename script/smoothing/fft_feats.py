@@ -1,4 +1,7 @@
-# Created on Thu Jun 30 21:04:40 2016 by Felipe Espic
+"""
+Old version of MagPhase vocoder, shipped with the LibWavGen library (Snickery).
+@author: Felipe Espic
+"""
 
 #==============================================================================
 # IMPORTS

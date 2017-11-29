@@ -1,3 +1,8 @@
+"""
+My personal plotting functions library (used for debugging).
+@author: Felipe Espic
+"""
+
 import numpy as np
 import __builtin__ as builtins
 import matplotlib
