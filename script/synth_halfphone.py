@@ -36,6 +36,7 @@ DODEBUG=False ## print debug information?
 
 from train_halfphone import debug
 
+from const import VERY_BIG_WEIGHT_VALUE
 
 # import pylab
 
@@ -199,6 +200,7 @@ class Synthesiser(object):
 
     def set_join_weights(self, weights):
         assert len(weights) == len(self.stream_list_join)
+        
         ## get from per-stream to per-coeff weights:
         join_weight_vector = []
         for (i,stream) in enumerate(self.stream_list_join):
@@ -206,6 +208,11 @@ class Synthesiser(object):
             #     join_weight_vector.extend([weights[i]]*2)
             # else:
                 join_weight_vector.extend([weights[i]]*self.datadims_join[stream])
+
+        if self.target_representation == 'epoch':
+            ## then natural2 type cost -- double up:
+            join_weight_vector = join_weight_vector + join_weight_vector
+
         join_weight_vector = np.array(join_weight_vector)
         join_contexts_weighted = weight(self.join_contexts_unweighted, join_weight_vector)   
 
@@ -878,6 +885,11 @@ def get_facts(vals):
                                             join_already_compiled=True, \
                                             add_path_of_last_resort=True)        
         self.stop_clock(start_time)          
+
+        if self.config.get('debug_with_adjacent_frames', False):
+            print 'Concatenate naturally contiguous units to debug concatenation!'
+            best_path = np.arange(500)
+
 
         ### TODO:
         # if self.config.get('WFST_pictures', False):
@@ -1677,9 +1689,13 @@ def get_facts(vals):
         direct = True
         #assert by_stream == False ## TODO: remove if unused
 
-        ## These are irrelevant when using halfphones -- suppress them:
-        forbid_repetition = False # self.config['forbid_repetition']
-        forbid_regression = False # self.config['forbid_regression']
+        if self.config['target_representation'] == 'epoch':
+            forbid_repetition = self.config.get('forbid_repetition', False)
+            forbid_regression = self.config.get('forbid_regression', 0)
+        else:
+            ## These are irrelevant when using halfphones -- suppress them:
+            forbid_repetition = False # self.config['forbid_repetition']
+            forbid_regression = False # self.config['forbid_regression']
 
         ## For now, force join cost to be natural2
         join_cost_type = self.config['join_cost_type']

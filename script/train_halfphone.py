@@ -148,7 +148,6 @@ def main_work(config, overwrite_existing_data=False):
     mean_join_dset[:] = mean_vec_join[:]
     std_join_dset[:] = std_vec_join[:]            
     
-    
     ## Set some values....
     
     target_dim = mean_vec_target.shape[0]
@@ -159,7 +158,7 @@ def main_work(config, overwrite_existing_data=False):
     fshift_seconds = (0.001 * config['frameshift_ms'])
     fshift = int(config['sample_rate'] * fshift_seconds)    
     samples_per_frame = fshift
-    
+
     
     ## go through data to find number of units:-   
 
@@ -170,6 +169,9 @@ def main_work(config, overwrite_existing_data=False):
         first_stream, first_streamdir = sorted(target_stream_dirs.items())[0]
         for base in flist:
             featfile = os.path.join(first_streamdir, base + '.' + first_stream)
+            if not os.path.exists(featfile):
+                print 'skipping %s'%(featfile)
+                continue
             speech = get_speech(featfile, datadims_target[first_stream])
             npoint, _ = speech.shape
             n_units += npoint
@@ -194,7 +196,10 @@ def main_work(config, overwrite_existing_data=False):
     else:
         cutpoints_dset = f.create_dataset("cutpoints", (n_units,2), maxshape=(n_units,2), dtype='i') 
 
-    # TODO: hardcoded for pitch sync cost
+    # hardcoded for pitch sync cost, unless epoch selection, in whcih case natural 2:
+    if config['target_representation'] == 'epoch':
+        join_dim *= 2
+
     join_contexts_dset = f.create_dataset("join_contexts", (n_units + 1, join_dim), maxshape=(n_units + 1, join_dim), dtype='f') 
 
     ## Optionally dump some extra data which can be used for training a better join cost:-
@@ -329,7 +334,9 @@ def main_work(config, overwrite_existing_data=False):
 
             cutpoints = segment_axis(pms_samples, 3, overlap=2, axis=0)
 
-            context_data = j_speech[1:-1, :]
+            #context_data = j_speech[1:-1, :]
+            m,n = j_speech.shape
+            context_data = segment_axis(j_speech, 2, overlap=1, axis=0).reshape((m-1, n*2))
 
             unit_names = np.array(['_']*(t_speech.shape[0]-2))
 
@@ -349,10 +356,10 @@ def main_work(config, overwrite_existing_data=False):
 
         m,n = unit_features.shape
         o,p = context_data.shape
-        if config['target_representation'] == 'epoch':
-            assert o == m, (o, m)
-        else:
-            assert o == m+1, (o, m)
+        # if config['target_representation'] == 'epoch':
+        #     assert o == m, (o, m)
+        # else:
+        assert o == m+1, (o, m)
 
         if config['dump_join_data']:
             start_join_feats, end_join_feats = get_join_data_AL(j_speech, cutpoint_indices, config['join_cost_halfwidth'])
@@ -363,11 +370,11 @@ def main_work(config, overwrite_existing_data=False):
         filenames_dset[start:start+m] = filenames
         cutpoints_dset[start:start+m,:] = cutpoints
 
-        if config['target_representation'] == 'epoch':        
+        #if config['target_representation'] == 'epoch':        
             ## cut off last join context... (kind of messy)
-            join_contexts_dset[start:start+m, :] = context_data[:,:]
-        else:
-            join_contexts_dset[start:start+m, :] = context_data[:-1,:]
+        #     join_contexts_dset[start:start+m, :] = context_data[:,:]
+        # else:
+        join_contexts_dset[start:start+m, :] = context_data[:-1,:]
 
         if config['dump_join_data']:
             start_join_feats_dset[start:start+m, :] = start_join_feats

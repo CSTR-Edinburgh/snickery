@@ -226,13 +226,29 @@ test_patterns = ['PirateAdventures_00001_00010']
 
 
 
-## Operation of the scripts
+## Selection of single pitch epochs
 
-### Training
-[Add more detail on training here]
+The ability to use single pitch epochs (in fact, units consisting of 2 epochs centred on a glottal closure instant and windowed) has been added to `train_halfphone.py` and `synth_halfphone.py`; these scripts should now be renamed...
 
-### Synthesis
-[Add more detail on synthesis here]
+The example config `config/blizzard_replication_04_epoch.cfg` gives some clues on how to use it. Currently I've only tested using natural parameters for target. `target_representation` should be set to `epoch`.
+
+To do:
+
+- check overlap add code. Consider alternative approaches to windowing and placement. 
+- experiment with phase-aware features
+- add code to pitch synchronise fixed frame rate targets -- in the example config, the natural parameters are already pitch synchronous.
+- store search tree instead of building from scratch each time we synthesise
+
+And also:
+
+- stream balancing (haven't tried yet)
+- are separate join and target costs even needed?
+- is full search even needed? Greedy methods?
+- what should active learning try to tune in this set up?
+
+
+
+
 
 
 
