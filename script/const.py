@@ -14,4 +14,4 @@ special_uv_value = -1000.0  ## value assigned to unvoiced frames of F0 etc after
 
 uv_scaling_factor = 20.0 ## number of times std of voice values unvoiced frames are set below 0.
 
-target_rep_widths = {'onepoint': 1, 'twopoint': 2, 'threepoint': 3} 
+target_rep_widths = {'onepoint': 1, 'twopoint': 2, 'threepoint': 3, 'epoch': 1} 
