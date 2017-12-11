@@ -136,18 +136,22 @@ class Synthesiser(object):
 
         self.first_silent_unit = 0 ## assume first unit is a silence, for v naive backoff
 
+        if self.config['target_representation'] != 'epoch':
+            self.quinphone_regex = re.compile(self.config['quinphone_regex'])
 
-        self.quinphone_regex = re.compile(self.config['quinphone_regex'])
-
-        print 'prepare data for search...'
-        self.unit_index = {}
-        for (i,quinphone) in enumerate(self.train_unit_names):
-            mono, diphone, triphone, quinphone = break_quinphone(quinphone)
-            #extract_quinphone(quinphone)
-            for form in [mono, diphone, triphone, quinphone]:
-                if form not in self.unit_index:
-                    self.unit_index[form] = []
-                self.unit_index[form].append(i)
+            print 'prepare data for search...'
+            self.unit_index = {}
+            for (i,quinphone) in enumerate(self.train_unit_names):
+                mono, diphone, triphone, quinphone = break_quinphone(quinphone)
+                #extract_quinphone(quinphone)
+                for form in [mono, diphone, triphone, quinphone]:
+                    if form not in self.unit_index:
+                        self.unit_index[form] = []
+                    self.unit_index[form].append(i)
+        else:
+            print 'epochs -- no indexing by label. Prepare search tree instead...'
+            print 'Set preselection to acoustic'
+            self.config['preselection_method'] = 'acoustic'
 
         ## set up some shorthand:-
         self.tool = self.config['openfst_bindir']
@@ -486,7 +490,7 @@ def get_facts(vals):
         # target_weights = vector_to_string(self.config['feature_weights_target'])
         # join_weights = vector_to_string(self.config['feature_weights_join'])
 
-        if self.config['synth_smooth']:
+        if self.config.get('synth_smooth', False):
             smooth='smooth_'
         else:
             smooth=''
@@ -758,21 +762,32 @@ def get_facts(vals):
         #fshift_seconds = (0.001 * self.config['frameshift_ms'])
         #fshift = int(self.config['sample_rate'] * fshift_seconds)        
 
-        labfile = os.path.join(lab_dir, base + '.' + self.config['lab_extension'])
-        labs = read_label(labfile, self.quinphone_regex)
+        if self.config['target_representation'] == 'epoch':
+            unit_features = speech[1:-1, :]
+            # pms_samples = np.array(pms_seconds * 48000, dtype=int)
+            # cutpoints = segment_axis(pms_samples, 3, overlap=2, axis=0)
+            # context_data = j_speech[1:-1, :]
+            # unit_names = np.array(['_']*(t_speech.shape[0]-2))
 
-        if self.config.get('untrim_silence_target_speech', False):
-            speech = reinsert_terminal_silence(speech, labs)
+        else:
+            labfile = os.path.join(lab_dir, base + '.' + self.config['lab_extension'])
+            labs = read_label(labfile, self.quinphone_regex)
 
-        if self.config.get('suppress_weird_festival_pauses', False):
-            labs = suppress_weird_festival_pauses(labs)
+            if self.config.get('untrim_silence_target_speech', False):
+                speech = reinsert_terminal_silence(speech, labs)
 
-        unit_names, unit_features, unit_timings = get_halfphone_stats(speech, labs, representation_type=self.target_representation)
-       
+            if self.config.get('suppress_weird_festival_pauses', False):
+                labs = suppress_weird_festival_pauses(labs)
+
+            unit_names, unit_features, unit_timings = get_halfphone_stats(speech, labs, representation_type=self.target_representation)
+           
         if self.config['weight_target_data']:                                
             unit_features = weight(unit_features, self.target_weight_vector)       
 
-        n_units = len(unit_names)
+        #### temp!!!!!
+        #unit_features = unit_features[:50, :]
+
+        n_units, _ = unit_features.shape
         self.stop_clock(start_time)
 
         if self.config['preselection_method'] == 'acoustic':
@@ -876,12 +891,15 @@ def get_facts(vals):
             self.report('' )
         else:
             start_time = self.start_clock('Extract and join units')
-            if self.config['synth_smooth'] :
-                print "Smooth output"
-                self.concatenateMagPhase(best_path, outstem + '.wav')
-            else:
-                print "Does not smooth output"
-                self.concatenate(best_path, outstem + '.wav')
+            if self.config['target_representation'] == 'epoch':
+                self.concatenate_epochs(best_path, outstem + '.wav')
+            else:  ### half phone etc concatenation
+                if self.config.get('synth_smooth', False):
+                    print "Smooth output"
+                    self.concatenateMagPhase(best_path, outstem + '.wav')
+                else:
+                    print "Does not smooth output"
+                    self.concatenate(best_path, outstem + '.wav')
             self.stop_clock(start_time)          
             self.report( 'Output wave: %s.wav'%(outstem ))
             self.report('')
@@ -892,7 +910,7 @@ def get_facts(vals):
             jscores = self.get_join_scores_per_stream(best_path)
             return (tscores, jscores)
 
-        if self.config['get_selection_info']:
+        if self.config['get_selection_info'] and self.config['target_representation'] != 'epoch':
             self.get_path_information(target_features, best_path)
 
     ## TODO_ verbosity level -- logging?
@@ -1271,6 +1289,34 @@ def get_facts(vals):
             print (frag.shape - orig)
         return frag
 
+
+
+    def retrieve_speech_epoch(self, index):
+
+        if self.config['hold_waves_in_memory']:
+            wave = self.waveforms[self.train_filenames[index]]  
+        else:     
+            wavefile = os.path.join(self.config['wav_datadir'], self.train_filenames[index] + '.wav')
+            wave, sample_rate = read_wave(wavefile)
+        T = len(wave)        
+        (start,middle,end) = self.train_cutpoints[index]
+        end += 1 ## non-inclusive end of slice
+
+        left_length = middle - start
+        right_length = end - middle 
+
+        frag = wave[start:end]
+
+        ### scale with non-symmetric hanning:
+        win = np.concatenate([np.hanning(left_length*2)[:left_length], np.hanning(right_length*2)[right_length:]])
+        frag *= win
+
+
+
+        return (frag, left_length)
+ 
+
+
     def concatenate(self, path, fname):
 
         frags = []
@@ -1281,6 +1327,16 @@ def get_facts(vals):
             synth_wave = np.concatenate(frags)
         else:
             synth_wave = self.overlap_add(frags)
+        write_wave(synth_wave, fname, 48000, quiet=True)
+
+
+    def concatenate_epochs(self, path, fname):
+
+        frags = []
+        for unit_index in path:
+            frags.append(self.retrieve_speech_epoch(unit_index))
+
+        synth_wave = self.epoch_overlap_add(frags)
         write_wave(synth_wave, fname, 48000, quiet=True)
 
 
@@ -1301,6 +1357,19 @@ def get_facts(vals):
             wave[start:start+len(frag)] += frag
             start += (len(frag) - taper) #+ 1
 
+        return wave 
+
+
+    def epoch_overlap_add(self, frags):
+        
+        length = sum([halflength for (wave, halflength) in frags[:-1]])
+        lastwave, _ = frags[-1]
+        length += len(lastwave) 
+        wave = np.zeros(length)
+        start = 0
+        for (frag, halflength) in frags:
+            wave[start:start+len(frag)] += frag
+            start += halflength
         return wave 
 
     def concatenateMagPhase(self,path,fname):
@@ -1868,6 +1937,9 @@ def get_facts(vals):
         cost_cache_to_text_fst(cost_cache, outfile, join_cost_weight=join_cost_weight)
         #print ' COMPILE ',
         stop_clock(t)
+
+
+
 
 
 

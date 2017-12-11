@@ -161,23 +161,38 @@ def main_work(config, overwrite_existing_data=False):
     samples_per_frame = fshift
     
     
-    ## go through data to find number of units:-
-    n_units = 0
-    for base in flist:
-        labfile = os.path.join(config['label_datadir'], base + '.' + config['lab_extension'])
-        n_states = len(read_label(labfile, config['quinphone_regex']))
-        assert n_states % 5 == 0
-        n_halfphones = (n_states / 5) * 2
-        n_units += n_halfphones
+    ## go through data to find number of units:-   
 
-    print '%s halfphones'%(n_units)
+    n_units = 0
+
+    if config['target_representation'] == 'epoch':
+        print target_stream_dirs
+        first_stream, first_streamdir = sorted(target_stream_dirs.items())[0]
+        for base in flist:
+            featfile = os.path.join(first_streamdir, base + '.' + first_stream)
+            speech = get_speech(featfile, datadims_target[first_stream])
+            npoint, _ = speech.shape
+            n_units += npoint
+    else:
+        for base in flist:
+            labfile = os.path.join(config['label_datadir'], base + '.' + config['lab_extension'])
+            n_states = len(read_label(labfile, config['quinphone_regex']))
+            assert n_states % 5 == 0
+            n_halfphones = (n_states / 5) * 2
+            n_units += n_halfphones
+
+    print '%s units (%s)'%(n_units,  config['target_representation'])
     
     ## 2) get ready to store data in HDF5:
     ## maxshape makes a dataset resizable
     train_dset = f.create_dataset("train_unit_features", (n_units, target_rep_size), maxshape=(n_units, target_rep_size), dtype='f') 
     phones_dset = f.create_dataset("train_unit_names", (n_units,), maxshape=(n_units,), dtype='|S50') 
     filenames_dset = f.create_dataset("filenames", (n_units,), maxshape=(n_units,), dtype='|S50') 
-    cutpoints_dset = f.create_dataset("cutpoints", (n_units,2), maxshape=(n_units,2), dtype='i') 
+
+    if config['target_representation'] == 'epoch':
+        cutpoints_dset = f.create_dataset("cutpoints", (n_units,3), maxshape=(n_units,3), dtype='i') 
+    else:
+        cutpoints_dset = f.create_dataset("cutpoints", (n_units,2), maxshape=(n_units,2), dtype='i') 
 
     # TODO: hardcoded for pitch sync cost
     join_contexts_dset = f.create_dataset("join_contexts", (n_units + 1, join_dim), maxshape=(n_units + 1, join_dim), dtype='f') 
@@ -217,6 +232,9 @@ def main_work(config, overwrite_existing_data=False):
 
         ### Get speech params for target cost (i.e. probably re-generated speech for consistency):
         t_speech = compose_speech(target_stream_dirs, base, stream_list_target, datadims_target) 
+        # print t_speech
+        # print t_speech.shape
+        # sys.exit('sedvsbvsfrb')
         if t_speech.shape == [1,1]:  ## bad return value  
             continue                    
         if config['standardise_target_data']:
@@ -241,69 +259,100 @@ def main_work(config, overwrite_existing_data=False):
         # print np.std(j_speech, axis=0).tolist() 
               
         j_frames, j_dim = j_speech.shape
-        if j_frames != len(pms_seconds):  
+        if j_frames != len(pms_seconds):      
             print (j_frames, len(pms_seconds))
             print 'Warning: number of rows in join cost features not same as number of pitchmarks:'
             print 'these features should be pitch synchronous. Skipping utterance!'
             continue  
+
+
+        if  config['target_representation'] == 'epoch':
+            t_frames, t_dim = t_speech.shape
+            if j_frames != len(pms_seconds):      
+                print (t_frames, len(pms_seconds))
+                print 'Warning: number of rows in target cost features not same as number of pitchmarks:'
+                print 'these features should be pitch synchronous (when target_representation == epoch). Skipping utterance!'
+                continue  
+
+
         # j_speech = j_speech[1:-1,:]  ## remove first and last frames corresponding to terminal pms
         # j_frames -= 2
 
+        if not config['target_representation'] == 'epoch':  ### TODO: pitch synchronise labels...
+            ### get labels:
+            labs = read_label(labfile, config['quinphone_regex'])   ### __pp:  pitch sync label?
+            label_frames = labs[-1][0][1] ## = How many (5msec) frames does label correspond to?
 
-        ### get labels:
-        labs = read_label(labfile, config['quinphone_regex'])
-        label_frames = labs[-1][0][1] ## = How many (5msec) frames does label correspond to?
+            ## Has silence been trimmed from either t_speech or j_speech?
 
-        ## Has silence been trimmed from either t_speech or j_speech?
+            ## Assume pitch synch join features are not silence trimmed
+            # if config.get('untrim_silence_join_speech', False):
+            #     print 'Add trimmed silence back to join cost speech features'
+            #     j_speech = reinsert_terminal_silence(j_speech, labs)
 
-        ## Assume pitch synch join features are not silence trimmed
-        # if config.get('untrim_silence_join_speech', False):
-        #     print 'Add trimmed silence back to join cost speech features'
-        #     j_speech = reinsert_terminal_silence(j_speech, labs)
-
-        if config.get('untrim_silence_target_speech', False):
-            print 'Add trimmed silence back to target cost speech features'
-            t_speech = reinsert_terminal_silence(t_speech, labs)
+            if config.get('untrim_silence_target_speech', False):
+                print 'Add trimmed silence back to target cost speech features'
+                t_speech = reinsert_terminal_silence(t_speech, labs)
 
 
-        # ### TODO: Length of T and J does not quite match here :-(  need to debug.
-        # print 'T'
-        # print t_speech.shape
-        # print 'J'
-        # print j_speech.shape
-        # print 'L'
-        # print label_frames
-     
-        ## Pad or trim speech to match the length of the labels (within a certain tolerance):-
-        t_speech = pad_speech_to_length(t_speech, labs)
+            # ### TODO: Length of T and J does not quite match here :-(  need to debug.
+            # print 'T'
+            # print t_speech.shape
+            # print 'J'
+            # print j_speech.shape
+            # print 'L'
+            # print label_frames
+         
+            ## Pad or trim speech to match the length of the labels (within a certain tolerance):-
+            t_speech = pad_speech_to_length(t_speech, labs)
 
-        if DODEBUG:
-            check_pitch_sync_speech(j_speech, labs, pms_seconds)
-        #j_speech = pad_speech_to_length(j_speech, labs) ## Assume pitch synch join features are all OK
+            if DODEBUG:
+                check_pitch_sync_speech(j_speech, labs, pms_seconds)
+            #j_speech = pad_speech_to_length(j_speech, labs) ## Assume pitch synch join features are all OK
 
-        ## Discard sentences where length of speech and labels differs too much:- 
-        if t_speech.size==1:
-            print 'Skip utterance'
-            continue
-        # if j_speech.size==1:
-        #     print 'Skip utterance'            
-        #     continue
+            ## Discard sentences where length of speech and labels differs too much:- 
+            if t_speech.size==1:
+                print 'Skip utterance'
+                continue
+            # if j_speech.size==1:
+            #     print 'Skip utterance'            
+            #     continue
 
-        ## Get representations of half phones to use in target cost:-
-        unit_names, unit_features, timings = get_halfphone_stats(t_speech, labs, config.get('target_representation', 'twopoint'))
+        if config['target_representation'] == 'epoch':
+            ## Get representations of half phones to use in target cost:-
+            unit_features = t_speech[1:-1, :]
 
-        ## Find 'cutpoints': pitchmarks which are considered to be the boudnaries of units, and where those
-        ## units will be concatenated:
-        cutpoints, cutpoint_indices = get_cutpoints(timings, pms_seconds)
+            ## Find 'cutpoints': pitchmarks which are considered to be the boudnaries of units, and where those
+            ## units will be concatenated:
+            #cutpoints, cutpoint_indices = get_cutpoints(timings, pms_seconds)
+            pms_samples = np.array(pms_seconds * 48000, dtype=int)
 
-        #context_data = get_contexts_for_natural_joincost(j_speech, timings, width=2)
-        context_data = get_contexts_for_pitch_synchronous_joincost(j_speech, cutpoint_indices)
+            cutpoints = segment_axis(pms_samples, 3, overlap=2, axis=0)
+
+            context_data = j_speech[1:-1, :]
+
+            unit_names = np.array(['_']*(t_speech.shape[0]-2))
+
+        else:
+            ## Get representations of half phones to use in target cost:-
+            unit_names, unit_features, timings = get_halfphone_stats(t_speech, labs, config.get('target_representation', 'twopoint'))
+
+            ## Find 'cutpoints': pitchmarks which are considered to be the boudnaries of units, and where those
+            ## units will be concatenated:
+            cutpoints, cutpoint_indices = get_cutpoints(timings, pms_seconds)
+
+            #context_data = get_contexts_for_natural_joincost(j_speech, timings, width=2)
+            context_data = get_contexts_for_pitch_synchronous_joincost(j_speech, cutpoint_indices)            
+
 
         filenames = [base] * len(cutpoints)
 
         m,n = unit_features.shape
         o,p = context_data.shape
-        assert o == m+1
+        if config['target_representation'] == 'epoch':
+            assert o == m, (o, m)
+        else:
+            assert o == m+1, (o, m)
 
         if config['dump_join_data']:
             start_join_feats, end_join_feats = get_join_data_AL(j_speech, cutpoint_indices, config['join_cost_halfwidth'])
@@ -314,8 +363,11 @@ def main_work(config, overwrite_existing_data=False):
         filenames_dset[start:start+m] = filenames
         cutpoints_dset[start:start+m,:] = cutpoints
 
-        ## cut off last join context... (kind of messy)
-        join_contexts_dset[start:start+m, :] = context_data[:-1,:]
+        if config['target_representation'] == 'epoch':        
+            ## cut off last join context... (kind of messy)
+            join_contexts_dset[start:start+m, :] = context_data[:,:]
+        else:
+            join_contexts_dset[start:start+m, :] = context_data[:-1,:]
 
         if config['dump_join_data']:
             start_join_feats_dset[start:start+m, :] = start_join_feats
@@ -325,8 +377,10 @@ def main_work(config, overwrite_existing_data=False):
         start += m        
         new_flist.append(base)
 
-    ## add database final join context back on (kind of messy)
-    join_contexts_dset[m, :] = context_data[-1,:]
+    
+    if config['target_representation'] != 'epoch':      
+        ## add database final join context back on (kind of messy)
+        join_contexts_dset[m, :] = context_data[-1,:]
 
     ## Number of units was computed before without considering dropped utterances, actual number
     ## will be smaller. Resize the data:
@@ -549,7 +603,8 @@ def compose_speech(feat_dir_dict, base, stream_list, datadims):
             print stream_fname + ' does not exist'
             return np.zeros((1,1))
         stream_data = get_speech(stream_fname, datadims[stream])
-
+        if stream == 'aef':
+            stream_data = np.vstack([np.zeros((1,datadims[stream])), stream_data, np.zeros((1,datadims[stream]))])
         ### previously:        
         # if stream in vuv_stream_names:
         #     uv_ix = np.arange(stream_data.shape[0])[stream_data[:,0]<=0.0]
