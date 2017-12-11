@@ -238,6 +238,9 @@ To do:
 - experiment with phase-aware features
 - add code to pitch synchronise fixed frame rate targets -- in the example config, the natural parameters are already pitch synchronous.
 - store search tree instead of building from scratch each time we synthesise
+- preselection is entirely acoustic -- add phonetic constraints or features back in?
+- check speeds for building vs. loading KD trees, and effect of `leaf_size` parameter
+
 
 And also:
 
@@ -245,6 +248,7 @@ And also:
 - are separate join and target costs even needed?
 - is full search even needed? Greedy methods?
 - what should active learning try to tune in this set up?
+
 
 
 

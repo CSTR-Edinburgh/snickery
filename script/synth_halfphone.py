@@ -22,7 +22,8 @@ import numpy as np
 import h5py
 import pywrapfst as openfst
 
-from sklearn.neighbors import KDTree as sklearn_KDTree
+# from sklearn.neighbors import KDTree as sklearn_KDTree
+import StashableKDTree
 
 from util import safe_makedir, vector_to_string, basename
 from speech_manip import read_wave, write_wave, weight
@@ -171,17 +172,27 @@ class Synthesiser(object):
         assert self.config['preselection_method'] in ['acoustic', 'quinphone']
         if self.config['preselection_method'] == 'acoustic':
 
-            start_time = self.start_clock('build KD tree')
-            
-            # if config['kdt_implementation'] == 'sklearn':
-            #train = weight(self.train_unit_features, self.target_weight_vector)
-            train = self.train_unit_features
-            self.tree = sklearn_KDTree(train, leaf_size=1, metric='euclidean')   
-            # elif config['kdt_implementation'] == 'scipy':
-            #     tree = scipy_cKDTree(train, leafsize=1) 
-            # elif config['kdt_implementation'] == 'stashable':
-            #     tree = StashableKDTree.StashableKDTree(train, leaf_size=1, metric='euclidean')
+            start_time = self.start_clock('build/reload KD tree')
+            treefile = get_data_dump_name(self.config, searchtree=True)
+            if os.path.exists(treefile):
+                print 'Tree file found -- reload from %s'%(treefile)
+                self.tree = StashableKDTree.resurrect_tree(treefile)
+            else:
+                print 'Seems like this is first time synthesis has been run on this data.'
+                print 'Build a search tree which will be saved for future use'
+
                 
+                
+                # if config['kdt_implementation'] == 'sklearn':
+                #train = weight(self.train_unit_features, self.target_weight_vector)
+                train = self.train_unit_features
+                #self.tree = sklearn_KDTree(train, leaf_size=1, metric='euclidean')   
+                # elif config['kdt_implementation'] == 'scipy':
+                #     tree = scipy_cKDTree(train, leafsize=1) 
+                # elif config['kdt_implementation'] == 'stashable':
+
+                self.tree = StashableKDTree.StashableKDTree(train, leaf_size=100, metric='euclidean')
+                self.tree.save_hdf(treefile)
             self.stop_clock(start_time)
 
 
