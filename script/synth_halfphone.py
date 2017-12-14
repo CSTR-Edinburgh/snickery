@@ -9,6 +9,7 @@ import glob
 import re
 import timeit
 import math
+import copy
 from argparse import ArgumentParser
 
 # Cassia added
@@ -17,7 +18,7 @@ import smoothing.libwavgen as lwg
 import smoothing.libaudio as la
 
 import numpy as np
-# import scipy
+import scipy
 
 import h5py
 import pywrapfst as openfst
@@ -54,6 +55,7 @@ import const
 from const import label_delimiter
 
 
+import cPickle as pickle
 
 # import matplotlib.pyplot as plt; plt.rcdefaults()
 # import matplotlib.pyplot as plt
@@ -170,11 +172,55 @@ class Synthesiser(object):
         print
 
         assert self.config['preselection_method'] in ['acoustic', 'quinphone']
-        if self.config['preselection_method'] == 'acoustic':
+
+
+        if self.config.get('greedy_search', False):
+
+            assert self.config['target_representation'] == 'epoch'
+            m,n = self.unit_start_data.shape
+            
+            ## Prev and current frames for join cost -- this is obtained in non-obvious way from
+            ## data written in training. TODO: consider storing this data differently in training?
+
+            ## copy the data (not reference it) here so the original join_contexts_unweighted 
+            ## is unaffected and we can later have other weights applied:-
+#            self.prev_join_rep = copy.copy(self.join_contexts_unweighted[:-1,:n/2]) ## all but last frame         
+#            self.current_join_rep = copy.copy(self.join_contexts_unweighted[:-1,n/2:]) ## all but last frame 
+
+            ## this should do same thing using weights applied from config:--
+            self.prev_join_rep = self.unit_start_data[:,:n/2]       
+            self.current_join_rep = self.unit_start_data[:,n/2:]
+
+            start_time = self.start_clock('build/reload joint KD tree')
+            ## Needs to be stored synthesis options specified (due to weights applied before tree construction):
+            treefile = get_data_dump_name(self.config) + '_' + self.make_synthesis_condition_name() + '_joint_tree.pkl' 
+            if os.path.exists(treefile):
+                print 'Tree file found -- reload from %s'%(treefile)
+                self.joint_tree = pickle.load(open(treefile,'rb'))
+            else:
+                print 'Seems like this is first time synthesis has been run on this data.'
+                print 'Build a search tree which will be saved for future use'
+
+                combined_rep = np.hstack([self.prev_join_rep, self.train_unit_features])
+                print 'make joint join + target tree...'
+                ### scipy.spatial.cKDTree is used for joint tree instead of sklearn one due to
+                ### speed of building. TODO: Also change in standard acoustic distance case (non-greedy).
+                ### TODO: check speed and reliability of pickling, could look at HDF storage as 
+                ### we did for StashableKDTree? Compare resurrection time with rebuild time.
+                self.joint_tree = scipy.spatial.cKDTree(combined_rep, leafsize=100, compact_nodes=False, balanced_tree=False)
+                print 'done -- now pickle...'
+                ### TODO: seems rebuilding is much quicker than reloading (at least -> 3000 sentences).
+                #pickle.dump(self.joint_tree,open(treefile,'wb'))
+                print 'done!'
+                
+
+
+
+        elif self.config['preselection_method'] == 'acoustic':
 
             start_time = self.start_clock('build/reload KD tree')
             treefile = get_data_dump_name(self.config, searchtree=True)
-            if os.path.exists(treefile):
+            if False: # os.path.exists(treefile):   ##### <---- for now, just rebuild tree at synthesis time
                 print 'Tree file found -- reload from %s'%(treefile)
                 self.tree = StashableKDTree.resurrect_tree(treefile)
             else:
@@ -191,8 +237,22 @@ class Synthesiser(object):
                 #     tree = scipy_cKDTree(train, leafsize=1) 
                 # elif config['kdt_implementation'] == 'stashable':
 
-                self.tree = StashableKDTree.StashableKDTree(train, leaf_size=100, metric='euclidean')
-                self.tree.save_hdf(treefile)
+                ### This was just to test build time of different KD tree implementations.
+                ### TODO: move to separate script/note. 
+                test_tree_build_times = False
+                if test_tree_build_times:
+
+                    np.random.shuffle(train)
+                    for datasize in range(10000, 1000000, 10000):
+                        sub_start_time = self.start_clock('build/reload KD tree: %s'%(datasize))
+                        tree = StashableKDTree.StashableKDTree(train[:datasize,:], leaf_size=100, metric='euclidean')
+                        #tree = scipy.spatial.cKDTree(train[:datasize,:], leafsize=100, compact_nodes=False, balanced_tree=False)
+                        self.stop_clock(sub_start_time)
+
+                #self.tree = StashableKDTree.StashableKDTree(train, leaf_size=100, metric='euclidean')
+                self.tree = scipy.spatial.cKDTree(train, leafsize=100, compact_nodes=False, balanced_tree=False)
+                print '...'
+                #self.tree.save_hdf(treefile)  ##### <---- for now, just rebuild tree at synthesis time
             self.stop_clock(start_time)
 
 
@@ -225,6 +285,7 @@ class Synthesiser(object):
             join_weight_vector = join_weight_vector + join_weight_vector
 
         join_weight_vector = np.array(join_weight_vector)
+        ## TODO: be more explicit about how this does NOT weight original self.join_contexts_unweighted
         join_contexts_weighted = weight(self.join_contexts_unweighted, join_weight_vector)   
 
         ## This should not copy:
@@ -360,8 +421,12 @@ class Synthesiser(object):
             #     all_jscores.append(jscores)
             # else:    
 
+            if self.config.get('greedy_search', False):
+                assert self.config.get('target_representation') == 'epoch'
+                self.synth_utt_greedy_epoch(fname, synth_type=synth_type)    
 
-            self.synth_utt(fname, synth_type=synth_type)    
+            else:
+                self.synth_utt(fname, synth_type=synth_type)    
 
         # if self.mode_of_operation == 'stream_weight_balancing':
         #     all_tscores = np.vstack(all_tscores)
@@ -513,11 +578,16 @@ def get_facts(vals):
         else:
             smooth=''
 
+        if self.config.get('greedy_search', False): 
+            greedy = 'greedy-yes_'
+        else:
+            greedy = 'greedy-no_'
+
         ##### Current version: weight per stream.
         target_weights = '-'.join([str(val) for val in self.config['target_stream_weights']])
         join_weights = '-'.join([str(val) for val in self.config['join_stream_weights']])
-        name = '%starget-%s_join-%s_scale-%s_presel-%s_jmetric-%s_cand-%s_taper-%s'%(
-                    smooth,
+        name = '%s%starget-%s_join-%s_scale-%s_presel-%s_jmetric-%s_cand-%s_taper-%s'%(
+                    greedy, smooth,
                     target_weights, join_weights, self.config['join_cost_weight'],
                     self.config['preselection_method'],
                     self.config['join_cost_type'],
@@ -748,6 +818,35 @@ def get_facts(vals):
     #     #     self.get_path_information(target_features, best_path)
 
 
+    def random_walk(self, start_ix, outfname):
+		#### TODO: move this to separate scriptfor tidying?
+        import random
+        #print self.train_unit_features.shape
+        #sys.exit('vsdrbv')
+
+        #walkdata = self.train_unit_features
+        m,n = self.train_unit_features.shape
+        left_left_context = np.vstack([np.zeros((20,n)), self.train_unit_features[:-20]])
+        left_context = np.vstack([np.zeros((10,n)), self.train_unit_features[:-10]])
+        walkdata = np.hstack([left_left_context, left_context, self.train_unit_features])
+
+        print 'make tree'
+        tree = StashableKDTree.StashableKDTree(walkdata, leaf_size=100, metric='euclidean')
+        print 'done'
+        assert start_ix < len(self.train_unit_features)
+        path = [start_ix]
+        ix = start_ix
+        while len(path) < 1000:
+            #print self.train_unit_features[ix,:].reshape((1,-1))
+            #print self.train_unit_features[ix,:].reshape((1,-1)).shape
+            (dists, indexes) = tree.query(walkdata[ix,:].reshape((1,-1)), k=10)
+            cand = indexes.flatten()
+            cand = [item for item in cand if item not in range(ix-5, ix+1)]
+            ix = random.choice(cand)
+            ix = ix + 1 
+            path.append(ix)
+        self.concatenate(path, outfname)
+        print path
 
     def synth_utt(self, base, synth_type='tune'): 
 
@@ -771,6 +870,7 @@ def get_facts(vals):
         start_time = self.start_clock('Get speech ')
         speech = compose_speech(data_dirs, base, self.stream_list_target, \
                                 self.config['datadims_target']) 
+
 
         m,dim = speech.shape
 
@@ -914,15 +1014,16 @@ def get_facts(vals):
             self.report('' )
         else:
             start_time = self.start_clock('Extract and join units')
-            if self.config['target_representation'] == 'epoch':
-                self.concatenate_epochs(best_path, outstem + '.wav')
-            else:  ### half phone etc concatenation
-                if self.config.get('synth_smooth', False):
-                    print "Smooth output"
-                    self.concatenateMagPhase(best_path, outstem + '.wav')
-                else:
-                    print "Does not smooth output"
-                    self.concatenate(best_path, outstem + '.wav')
+            # if self.config['target_representation'] == 'epoch':
+            #     self.concatenate_epochs(best_path, outstem + '.wav')
+            #     #self.make_epoch_labels(best_path, outstem + '.lab')   ### !!!!
+
+            if self.config.get('synth_smooth', False) and not (self.config['target_representation'] == 'epoch'):
+                print "Smooth output"
+                self.concatenateMagPhase(best_path, outstem + '.wav')
+            else:
+                print "Does not smooth output"
+                self.concatenate(best_path, outstem + '.wav')
             self.stop_clock(start_time)          
             self.report( 'Output wave: %s.wav'%(outstem ))
             self.report('')
@@ -935,6 +1036,234 @@ def get_facts(vals):
 
         if self.config['get_selection_info'] and self.config['target_representation'] != 'epoch':
             self.get_path_information(target_features, best_path)
+
+
+
+
+    def synth_utt_greedy_epoch(self, base, synth_type='tune'): 
+        ### TODO: refactor to deduplicate large parts of this and synth_utt()
+
+        if synth_type == 'test':
+            data_dirs = self.test_data_target_dirs
+            lab_dir = self.config['test_lab_dir']
+        elif synth_type == 'tune':
+            data_dirs = self.tune_data_target_dirs
+            lab_dir = self.config['tune_lab_dir']            
+        else:
+            sys.exit('Unknown synth_type  9489384')
+
+        train_condition = make_train_condition_name(self.config)
+        synth_condition = self.make_synthesis_condition_name()
+        synth_dir = os.path.join(self.config['workdir'], 'synthesis_%s'%(synth_type), train_condition, synth_condition)
+        safe_makedir(synth_dir)
+            
+        self.report('               ==== GREEDILY SYNTHESISE %s ===='%(base))
+        outstem = os.path.join(synth_dir, base)       
+
+        start_time = self.start_clock('Get speech ')
+        speech = compose_speech(data_dirs, base, self.stream_list_target, \
+                                self.config['datadims_target']) 
+
+
+        #speech = speech[10:80,:]
+
+        m,dim = speech.shape
+
+        if (self.config['standardise_target_data'], True):                                
+            speech = standardise(speech, self.mean_vec_target, self.std_vec_target)         
+        
+        #fshift_seconds = (0.001 * self.config['frameshift_ms'])
+        #fshift = int(self.config['sample_rate'] * fshift_seconds)        
+
+        if self.config['target_representation'] == 'epoch':
+            unit_features = speech[1:-1, :]
+        else:
+            labfile = os.path.join(lab_dir, base + '.' + self.config['lab_extension'])
+            labs = read_label(labfile, self.quinphone_regex)
+
+            if self.config.get('untrim_silence_target_speech', False):
+                speech = reinsert_terminal_silence(speech, labs)
+
+            if self.config.get('suppress_weird_festival_pauses', False):
+                labs = suppress_weird_festival_pauses(labs)
+
+            unit_names, unit_features, unit_timings = get_halfphone_stats(speech, labs, representation_type=self.target_representation)
+           
+        if self.config['weight_target_data']:                                
+            unit_features = weight(unit_features, self.target_weight_vector)       
+
+        n_units, _ = unit_features.shape
+        self.stop_clock(start_time)
+
+
+
+
+        #### =-------------
+        ##### For greedy version, skip preselection and full Viterbi search
+        #### =-------------
+        best_path = self.greedy_joint_search(unit_features)
+
+        # if self.config['preselection_method'] == 'acoustic':
+
+        #     start_time = self.start_clock('Acoustic select units ')
+        #     ## call has same syntax for sklearn and scipy KDTrees:--
+        #     distances, candidates = self.tree.query(unit_features, k=self.config['n_candidates'])
+        #     self.stop_clock(start_time) 
+
+        # elif self.config['preselection_method'] == 'quinphone':
+
+        #     start_time = self.start_clock('Preselect units ')
+        #     #candidates = np.ones((n_units, self.config['n_candidates'])) * -1
+        #     candidates = []
+        #     for quinphone in unit_names:
+        #         current_candidates = []
+        #         mono, diphone, triphone, quinphone = break_quinphone(quinphone) 
+        #         #print mono, diphone, triphone, quinphone
+        #         for form in [quinphone, triphone, diphone, mono]:
+        #             for unit in self.unit_index.get(form, []):
+        #                 current_candidates.append(unit)
+        #                 if len(current_candidates) == self.config['n_candidates']:
+        #                     break
+        #             if len(current_candidates) == self.config['n_candidates']:
+        #                 break
+        #         if len(current_candidates) == 0:
+        #             print 'Warning: no cands in training data to match %s! Use v naive backoff to silence...'%(quinphone)
+        #             current_candidates = [self.first_silent_unit]
+        #             ## TODO: better backoff
+        #             #sys.exit('no cands in training data to match %s! TODO: add backoff...'%(quinphone))
+
+        #         if len(current_candidates) != self.config['n_candidates']:
+        #             # 'W', TODO -- warning
+        #             #print 'Warning: only %s candidates for %s (%s)' % (len(current_candidates), quinphone, current_candidates)
+        #             difference = self.config['n_candidates'] - len(current_candidates) 
+        #             current_candidates += [-1]*difference
+        #         candidates.append(current_candidates)
+        #     candidates = np.array(candidates)
+        #     self.stop_clock(start_time)          
+
+
+        #     start_time = self.start_clock('Compute target distances...')
+        #     zero_target_cost = False
+        #     if zero_target_cost:
+        #         distances = np.ones(candidates.shape)
+        #     else:
+        #         distances = []
+        #         for (i,row) in enumerate(candidates):
+        #             candidate_features = self.train_unit_features[row]
+        #             target_features = unit_features[i].reshape((1,-1))
+        #             dists = np.sqrt(np.sum(((candidate_features - target_features)**2), axis=1))
+        #             distances.append(dists)
+        #         distances = np.array(distances)
+        #     self.stop_clock(start_time)          
+       
+
+        # else:
+        #     sys.exit('preselection_method unknown')
+
+
+
+        # # print candidates.shape
+        # # np.save('/tmp/cand', candidates)
+        # # sys.exit('wevwrevwrbv')
+
+        # if self.mode_of_operation == 'find_join_candidates':
+        #     print 'mode_of_operation == find_join_candidates: return here'
+        #     ## TODO: shuffle above operations so we can return this before looking at target features
+        #     return candidates          
+
+
+        # start_time = self.start_clock('Make target FST')
+        # T = make_target_sausage_lattice(distances, candidates)        
+        # self.stop_clock(start_time)          
+
+        # self.precomputed_joincost = False
+        # if self.precomputed_joincost:
+        #     print 'FORCE: Use existing join cost loaded from %s'%(self.join_cost_file)
+        #     sys.exit('precomputed join cost not fully implemented - 87867')
+        # else:
+        #     ### compile J directly without writing to text. In fact doesn't save much time...
+        #     J = self.make_on_the_fly_join_lattice_BLOCK_DIRECT(candidates)
+            
+
+        # start_time = self.start_clock('Compose and find shortest path')  
+        # if not self.precomputed_joincost:   
+        #     best_path = get_best_path_SIMP(T, J, \
+        #                                     join_already_compiled=True, \
+        #                                     add_path_of_last_resort=False)                        
+        # else:
+        #     sys.exit('precomputed join cost not fully implemented - 2338578')
+        #     J = self.J ## already loaded into memory
+        #     best_path = get_best_path_SIMP(T, J, \
+        #                                     join_already_compiled=True, \
+        #                                     add_path_of_last_resort=True)        
+        # self.stop_clock(start_time)          
+
+        if self.config.get('debug_with_adjacent_frames', False):
+            print 'Concatenate naturally contiguous units to debug concatenation!'
+            best_path = np.arange(500)
+
+
+        ### TODO:
+        # if self.config.get('WFST_pictures', False):
+
+        self.report( 'got shortest path:')
+        self.report( best_path)
+ 
+        if self.mode_of_operation == 'stream_weight_balancing':
+            self.report('' )
+            self.report( 'balancing stream weights -- skip making waveform')
+            self.report('' )
+        else:
+            start_time = self.start_clock('Extract and join units')
+            # if self.config['target_representation'] == 'epoch':
+            #     self.concatenate_epochs(best_path, outstem + '.wav')
+            #     #self.make_epoch_labels(best_path, outstem + '.lab')   ### !!!!
+
+            if self.config.get('synth_smooth', False) and not (self.config['target_representation'] == 'epoch'):
+                print "Smooth output"
+                self.concatenateMagPhase(best_path, outstem + '.wav')
+            else:
+                print "Does not smooth output"
+                self.concatenate(best_path, outstem + '.wav')
+            self.stop_clock(start_time)          
+            self.report( 'Output wave: %s.wav'%(outstem ))
+            self.report('')
+            self.report('')
+
+        if self.mode_of_operation == 'stream_weight_balancing':
+            tscores = self.get_target_scores_per_stream(target_features, best_path)
+            jscores = self.get_join_scores_per_stream(best_path)
+            return (tscores, jscores)
+
+        if self.config['get_selection_info'] and self.config['target_representation'] != 'epoch':
+            self.get_path_information(target_features, best_path)
+
+
+    def greedy_joint_search(self, unit_features):
+        assert self.config['target_representation'] == 'epoch'
+
+        start_time = self.start_clock('Greedy search')
+        path = []
+        m,n = self.current_join_rep.shape
+        #m,n = self.join_contexts_unweighted.shape
+        prev_join_vector = np.zeros((n,))
+        #current_join_rep = self.join_contexts_unweighted[:-1,n/2:] ## all but last frame 
+        #current_join_rep *= 0.3
+        ix = -1 
+        for target_vector in unit_features:
+            both = np.concatenate([prev_join_vector, target_vector]).reshape((1,-1))
+            dist, indexes = self.joint_tree.query(both, k=7)
+            cands = indexes.flatten()
+            if ix > -1:
+                cands = [item for item in cands if item not in range(ix-5, ix+1)]
+            ix = cands[0]
+            path.append(ix)
+            prev_join_vector = self.current_join_rep[ix,:]
+        self.stop_clock(start_time)
+        print 'Greedy path found:'
+        print path
+        return path
+
 
     ## TODO_ verbosity level -- logging?
     def report(self, msg):
@@ -1342,15 +1671,18 @@ def get_facts(vals):
 
     def concatenate(self, path, fname):
 
-        frags = []
-        for unit_index in path:
-            frags.append(self.retrieve_speech(unit_index))
-
-        if self.config['taper_length'] == 0:
-            synth_wave = np.concatenate(frags)
+        if self.config['target_representation'] == 'epoch':
+            self.concatenate_epochs(path, fname)
         else:
-            synth_wave = self.overlap_add(frags)
-        write_wave(synth_wave, fname, 48000, quiet=True)
+            frags = []
+            for unit_index in path:
+                frags.append(self.retrieve_speech(unit_index))
+
+            if self.config['taper_length'] == 0:
+                synth_wave = np.concatenate(frags)
+            else:
+                synth_wave = self.overlap_add(frags)
+            write_wave(synth_wave, fname, 48000, quiet=True)
 
 
     def concatenate_epochs(self, path, fname):
@@ -1361,6 +1693,30 @@ def get_facts(vals):
 
         synth_wave = self.epoch_overlap_add(frags)
         write_wave(synth_wave, fname, 48000, quiet=True)
+
+
+    # def make_epoch_labels(self, path, fname):
+    #     start_points = []
+    #     start = 0
+    #     for (i,unit_index) in enumerate(path):
+    #         (start,middle,end) = self.train_cutpoints[unit_index]
+    #         left_length = middle - start
+    #         right_length = end - middle 
+
+    #         start += 
+    #         start_points.append(start)
+
+    #     frag = wave[start:end]
+
+    #     ### scale with non-symmetric hanning:
+    #     win = np.concatenate([np.hanning(left_length*2)[:left_length], np.hanning(right_length*2)[right_length:]])
+    #     frag *= win
+
+
+
+    #     return (frag, left_length)
+
+
 
 
     def overlap_add(self, frags):
