@@ -160,11 +160,13 @@ def main_work(config, overwrite_existing_data=False):
     samples_per_frame = fshift
 
     
-    ## go through data to find number of units:-   
-
+    ## go through data to find number of units:- 
+    print 'go through data to find number of units:- '  
+    
     n_units = 0
 
     if config['target_representation'] == 'epoch':
+        new_flist = []
         print target_stream_dirs
         first_stream, first_streamdir = sorted(target_stream_dirs.items())[0]
         for base in flist:
@@ -175,6 +177,8 @@ def main_work(config, overwrite_existing_data=False):
             speech = get_speech(featfile, datadims_target[first_stream])
             npoint, _ = speech.shape
             n_units += npoint
+            new_flist.append(base)
+        flist = new_flist
     else:
         for base in flist:
             labfile = os.path.join(config['label_datadir'], base + '.' + config['lab_extension'])
