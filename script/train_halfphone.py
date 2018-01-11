@@ -21,23 +21,26 @@ import numpy as np
 #import scipy.signal
 
 from segmentaxis import segment_axis
-from speech_manip import get_speech
+from speech_manip import get_speech, read_wave
+from mulaw2 import lin2mu
 from label_manip import extract_quinphone
 from util import splice_data, unsplice, safe_makedir, readlist
 import const
 from const import label_delimiter, vuv_stream_names, label_length_diff_tolerance, target_rep_widths
 
 
+import resample
 
 
 
 
-def locate_stream_directories(directories, streams):
+def locate_stream_directories(directories, streams): 
     '''
     For each stream in streams, find a subdirectory for some directory in 
     directories, directory/stream. Make sure that there is only 1 such subdirectory
     named after the stream. Return dict mapping from stream names to directory locations. 
     '''
+   
     stream_directories = {}
     for stream in streams:
         for directory in directories:
@@ -61,6 +64,11 @@ def main_work(config, overwrite_existing_data=False):
     ## (temporary) assertions:-
     assert config['standardise_target_data'] == True
     
+    config['joincost_features'] = True    ## want to use self. here, but no class defined...
+    if config['target_representation'] == 'sample':
+        config['joincost_features'] = False
+
+
     database_fname = get_data_dump_name(config)
 
     if os.path.isfile(database_fname):
@@ -69,20 +77,25 @@ def main_work(config, overwrite_existing_data=False):
         else:
             os.system('rm '+database_fname)
             
-    target_feat_dirs = config['target_datadirs']
-    join_feat_dirs = config['join_datadirs']
 
-    datadims_join = config['datadims_join']
-    datadims_target = config['datadims_target']
     n_train_utts = config['n_train_utts']
-    
 
-    stream_list_join = config['stream_list_join']    
+    target_feat_dirs = config['target_datadirs']
+    datadims_target = config['datadims_target']
     stream_list_target = config['stream_list_target'] 
-    
-    ## get dicts mapping e.g. 'mgc': '/path/to/mgc/'
+    ## get dicts mapping e.g. 'mgc': '/path/to/mgc/' : -
     target_stream_dirs = locate_stream_directories(target_feat_dirs, stream_list_target)
-    join_stream_dirs   = locate_stream_directories(join_feat_dirs, stream_list_join)
+
+    if config['joincost_features']:
+        join_feat_dirs = config['join_datadirs']
+        datadims_join = config['datadims_join']
+        stream_list_join = config['stream_list_join']    
+        ## get dicts mapping e.g. 'mgc': '/path/to/mgc/' : -
+        join_stream_dirs   = locate_stream_directories(join_feat_dirs, stream_list_join)
+    
+    
+    
+    
 
     # for stream in stream_list_target:
     #     stream_dir = os.path.join(target_feat_dir, stream)
@@ -127,7 +140,8 @@ def main_work(config, overwrite_existing_data=False):
 
     ## 1A) First pass: get mean and std per stream for each of {target,join}
     (mean_vec_target, std_vec_target) = get_mean_std(target_stream_dirs, stream_list_target, datadims_target, flist)
-    (mean_vec_join, std_vec_join) = get_mean_std(join_stream_dirs, stream_list_join, datadims_join, flist)
+    if config['joincost_features']:  
+        (mean_vec_join, std_vec_join) = get_mean_std(join_stream_dirs, stream_list_join, datadims_join, flist)
 
 
 
@@ -140,32 +154,37 @@ def main_work(config, overwrite_existing_data=False):
     mean_target_dset = f.create_dataset("mean_target", np.shape(mean_vec_target), dtype='f')
     std_target_dset = f.create_dataset("std_target", np.shape(std_vec_target), dtype='f')
 
-    mean_join_dset = f.create_dataset("mean_join", np.shape(mean_vec_join), dtype='f')
-    std_join_dset = f.create_dataset("std_join", np.shape(std_vec_join), dtype='f')
+    if config['joincost_features']:
+        mean_join_dset = f.create_dataset("mean_join", np.shape(mean_vec_join), dtype='f')
+        std_join_dset = f.create_dataset("std_join", np.shape(std_vec_join), dtype='f')
 
     mean_target_dset[:] = mean_vec_target[:]
     std_target_dset[:] = std_vec_target[:]
-    mean_join_dset[:] = mean_vec_join[:]
-    std_join_dset[:] = std_vec_join[:]            
-    
+
+    if config['joincost_features']:    
+        mean_join_dset[:] = mean_vec_join[:]
+        std_join_dset[:] = std_vec_join[:]            
+        
+   
+
     ## Set some values....
     
     target_dim = mean_vec_target.shape[0]
-    join_dim = mean_vec_join.shape[0]
+    if config['joincost_features']:
+        join_dim = mean_vec_join.shape[0]
 
     target_rep_size = target_dim * target_rep_widths[config.get('target_representation', 'twopoint')]
 
     fshift_seconds = (0.001 * config['frameshift_ms'])
     fshift = int(config['sample_rate'] * fshift_seconds)    
     samples_per_frame = fshift
-
-    
-    ## go through data to find number of units:- 
+ 
     print 'go through data to find number of units:- '  
     
     n_units = 0
 
-    if config['target_representation'] == 'epoch':
+
+    if config['target_representation'] in ['epoch', 'sample']:
         new_flist = []
         print target_stream_dirs
         first_stream, first_streamdir = sorted(target_stream_dirs.items())[0]
@@ -187,24 +206,33 @@ def main_work(config, overwrite_existing_data=False):
             n_halfphones = (n_states / 5) * 2
             n_units += n_halfphones
 
+    if config['target_representation']  == 'sample': 
+        n_units *= (config['sample_rate']*fshift_seconds)
+
     print '%s units (%s)'%(n_units,  config['target_representation'])
     
     ## 2) get ready to store data in HDF5:
     ## maxshape makes a dataset resizable
-    train_dset = f.create_dataset("train_unit_features", (n_units, target_rep_size), maxshape=(n_units, target_rep_size), dtype='f') 
-    phones_dset = f.create_dataset("train_unit_names", (n_units,), maxshape=(n_units,), dtype='|S50') 
-    filenames_dset = f.create_dataset("filenames", (n_units,), maxshape=(n_units,), dtype='|S50') 
+    train_dset = f.create_dataset("train_unit_features", (n_units, config['wave_context_length'] + target_rep_size), maxshape=(n_units, config['wave_context_length'] + target_rep_size), dtype='f') 
 
-    if config['target_representation'] == 'epoch':
-        cutpoints_dset = f.create_dataset("cutpoints", (n_units,3), maxshape=(n_units,3), dtype='i') 
+    if config['target_representation']  == 'sample': 
+        #wavecontext_dset = f.create_dataset("wavecontext", (n_units, config['wave_context_length']), maxshape=(n_units,config['wave_context_length']), dtype='i') 
+        nextsample_dset = f.create_dataset("nextsample", (n_units, 1), maxshape=(n_units,1), dtype='f') 
+
     else:
-        cutpoints_dset = f.create_dataset("cutpoints", (n_units,2), maxshape=(n_units,2), dtype='i') 
+        phones_dset = f.create_dataset("train_unit_names", (n_units,), maxshape=(n_units,), dtype='|S50') 
+        filenames_dset = f.create_dataset("filenames", (n_units,), maxshape=(n_units,), dtype='|S50') 
 
-    # hardcoded for pitch sync cost, unless epoch selection, in whcih case natural 2:
-    if config['target_representation'] == 'epoch':
-        join_dim *= 2
+        if config['target_representation'] == 'epoch':
+            cutpoints_dset = f.create_dataset("cutpoints", (n_units,3), maxshape=(n_units,3), dtype='i') 
+        else:
+            cutpoints_dset = f.create_dataset("cutpoints", (n_units,2), maxshape=(n_units,2), dtype='i') 
 
-    join_contexts_dset = f.create_dataset("join_contexts", (n_units + 1, join_dim), maxshape=(n_units + 1, join_dim), dtype='f') 
+        # hardcoded for pitch sync cost, unless epoch selection, in whcih case natural 2:
+        if config['target_representation'] == 'epoch':
+            join_dim *= 2
+
+        join_contexts_dset = f.create_dataset("join_contexts", (n_units + 1, join_dim), maxshape=(n_units + 1, join_dim), dtype='f') 
 
     ## Optionally dump some extra data which can be used for training a better join cost:-
     if config['dump_join_data']:
@@ -228,7 +256,8 @@ def main_work(config, overwrite_existing_data=False):
         print base    
         wname = os.path.join(config['wav_datadir'], base + '.wav')
         pm_file = os.path.join(config['pm_datadir'], base + '.pm')
-        labfile = os.path.join(config['label_datadir'], base + '.' + config['lab_extension'])
+
+
         if not (os.path.isfile(wname) or os.path.isfile(pm_file)):
             print 'Warning: no wave or pm -- skip!'
             continue
@@ -241,38 +270,56 @@ def main_work(config, overwrite_existing_data=False):
 
         ### Get speech params for target cost (i.e. probably re-generated speech for consistency):
         t_speech = compose_speech(target_stream_dirs, base, stream_list_target, datadims_target) 
+
         # print t_speech
         # print t_speech.shape
         # sys.exit('sedvsbvsfrb')
         if t_speech.shape == [1,1]:  ## bad return value  
             continue                    
+
+        ### upsample before standardisation (inefficient, but standardisation rewrites uv values?? TODO: check this)
+        if config['target_representation'] == 'sample':
+            nframes, _ = t_speech.shape
+            ### orignally:
+            #len_wave = int(config['sample_rate'] * fshift_seconds * nframes)
+            wavecontext, nextsample = get_waveform_fragments(wname, config['sample_rate'], config['wave_context_length'], nonlin_wave=config['nonlin_wave'])
+            len_wave, _ = wavecontext.shape
+
+            t_speech = resample.upsample(len_wave, config['sample_rate'], fshift_seconds, t_speech, f0_dim=-1, convention='world')
+            if t_speech.size == 0:
+                print 'Warning: trouble upsampling -- skip!'
+                continue                    
+
+
+
         if config['standardise_target_data']:
             t_speech = standardise(t_speech, mean_vec_target, std_vec_target)
 
 
-        ### Get speech params for join cost (i.e. probably natural speech).
-        ### These are now expected to have already been resampled so that they are pitch-synchronous. 
-        j_speech = compose_speech(join_stream_dirs, base, stream_list_join, datadims_join)
-        print j_speech.shape
-        if j_speech.size == 1:  ## bad return value  
-            continue 
-        # print '-------a'  
-        # print j_speech      
-        # print np.mean(j_speech, axis=0).tolist()
-        # print np.std(j_speech, axis=0).tolist()                    
-        if config['standardise_join_data']:
-            j_speech = standardise(j_speech, mean_vec_join, std_vec_join) 
-        # print '---------b'
-        # print j_speech  
-        # print np.mean(j_speech, axis=0).tolist()
-        # print np.std(j_speech, axis=0).tolist() 
-              
-        j_frames, j_dim = j_speech.shape
-        if j_frames != len(pms_seconds):      
-            print (j_frames, len(pms_seconds))
-            print 'Warning: number of rows in join cost features not same as number of pitchmarks:'
-            print 'these features should be pitch synchronous. Skipping utterance!'
-            continue  
+        if config['target_representation'] == 'sample':
+            t_speech = np.hstack([wavecontext, t_speech])
+
+            
+
+
+
+        if config['joincost_features']:
+            ### Get speech params for join cost (i.e. probably natural speech).
+            ### These are now expected to have already been resampled so that they are pitch-synchronous. 
+            j_speech = compose_speech(join_stream_dirs, base, stream_list_join, datadims_join)
+            print j_speech.shape
+            if j_speech.size == 1:  ## bad return value  
+                continue 
+            if config['standardise_join_data']:
+                j_speech = standardise(j_speech, mean_vec_join, std_vec_join) 
+                  
+
+            j_frames, j_dim = j_speech.shape
+            if j_frames != len(pms_seconds):      
+                print (j_frames, len(pms_seconds))
+                print 'Warning: number of rows in join cost features not same as number of pitchmarks:'
+                print 'these features should be pitch synchronous. Skipping utterance!'
+                continue  
 
 
         if  config['target_representation'] == 'epoch':
@@ -287,8 +334,9 @@ def main_work(config, overwrite_existing_data=False):
         # j_speech = j_speech[1:-1,:]  ## remove first and last frames corresponding to terminal pms
         # j_frames -= 2
 
-        if not config['target_representation'] == 'epoch':  ### TODO: pitch synchronise labels...
+        if not config['target_representation'] in ['epoch', 'sample']:  ### TODO: pitch synchronise labels...
             ### get labels:
+            labfile = os.path.join(config['label_datadir'], base + '.' + config['lab_extension'])
             labs = read_label(labfile, config['quinphone_regex'])   ### __pp:  pitch sync label?
             label_frames = labs[-1][0][1] ## = How many (5msec) frames does label correspond to?
 
@@ -327,7 +375,11 @@ def main_work(config, overwrite_existing_data=False):
             #     print 'Skip utterance'            
             #     continue
 
-        if config['target_representation'] == 'epoch':
+        if config['target_representation'] == 'sample':
+            
+            unit_features = t_speech
+
+        elif config['target_representation'] == 'epoch':
             ## Get representations of half phones to use in target cost:-
             unit_features = t_speech[1:-1, :]
 
@@ -355,41 +407,40 @@ def main_work(config, overwrite_existing_data=False):
             #context_data = get_contexts_for_natural_joincost(j_speech, timings, width=2)
             context_data = get_contexts_for_pitch_synchronous_joincost(j_speech, cutpoint_indices)            
 
-
-        filenames = [base] * len(cutpoints)
-
         m,n = unit_features.shape
-        o,p = context_data.shape
-        # if config['target_representation'] == 'epoch':
-        #     assert o == m, (o, m)
-        # else:
-        assert o == m+1, (o, m)
+        if config['joincost_features']:
+            filenames = [base] * len(cutpoints)
+            o,p = context_data.shape
+            # if config['target_representation'] == 'epoch':
+            #     assert o == m, (o, m)
+            # else:
+            assert o == m+1, (o, m)
 
-        if config['dump_join_data']:
-            start_join_feats, end_join_feats = get_join_data_AL(j_speech, cutpoint_indices, config['join_cost_halfwidth'])
+            if config['dump_join_data']:
+                start_join_feats, end_join_feats = get_join_data_AL(j_speech, cutpoint_indices, config['join_cost_halfwidth'])
 
         ## Add everything to database:
         train_dset[start:start+m, :] = unit_features
-        phones_dset[start:start+m] = unit_names
-        filenames_dset[start:start+m] = filenames
-        cutpoints_dset[start:start+m,:] = cutpoints
+        if config['joincost_features']:
+            phones_dset[start:start+m] = unit_names
+            filenames_dset[start:start+m] = filenames
+            cutpoints_dset[start:start+m,:] = cutpoints
+            join_contexts_dset[start:start+m, :] = context_data[:-1,:]
 
-        #if config['target_representation'] == 'epoch':        
-            ## cut off last join context... (kind of messy)
-        #     join_contexts_dset[start:start+m, :] = context_data[:,:]
-        # else:
-        join_contexts_dset[start:start+m, :] = context_data[:-1,:]
+            if config['dump_join_data']:
+                start_join_feats_dset[start:start+m, :] = start_join_feats
+                end_join_feats_dset[start:start+m, :] = end_join_feats            
 
-        if config['dump_join_data']:
-            start_join_feats_dset[start:start+m, :] = start_join_feats
-            end_join_feats_dset[start:start+m, :] = end_join_feats            
+        if config['target_representation'] == 'sample':
+            #wavecontext_dset[start:start+m, :] = wavecontext
+            nextsample_dset[start:start+m, :] = nextsample
 
 
         start += m        
         new_flist.append(base)
 
     
-    if config['target_representation'] != 'epoch':      
+    if config['target_representation'] not in ['epoch', 'sample']:      
         ## add database final join context back on (kind of messy)
         join_contexts_dset[m, :] = context_data[-1,:]
 
@@ -401,11 +452,18 @@ def main_work(config, overwrite_existing_data=False):
     print 
 
     train_dset.resize(actual_nframes, axis=0)
-    phones_dset.resize(actual_nframes, axis=0)
-    filenames_dset.resize(actual_nframes, axis=0)
-    cutpoints_dset.resize(actual_nframes, axis=0)
 
-    join_contexts_dset.resize(actual_nframes+1, axis=0)
+    if config['joincost_features']:
+        phones_dset.resize(actual_nframes, axis=0)
+        filenames_dset.resize(actual_nframes, axis=0)
+        cutpoints_dset.resize(actual_nframes, axis=0)
+
+        join_contexts_dset.resize(actual_nframes+1, axis=0)
+
+    if config['target_representation'] == 'sample':
+        # wavecontext_dset.resize(actual_nframes, axis=0)
+        nextsample_dset.resize(actual_nframes, axis=0)
+
 
     print 
     print 'Storing hybrid voice data:'
@@ -555,9 +613,7 @@ def standardise(speech, mean_vec, std_vec):
     ### record where unvoiced values are with Boolean array, so we can revert them later:
     uv_positions = (speech==const.special_uv_value)
 
-    ## TODO: switch to broadcasting here
     mean_vec = mean_vec.reshape((1,-1))
-    # std_mat = std_vec,(m,1))
     
     ## standardise:-
     speech = (speech - mean_vec) / std_vec
@@ -598,7 +654,9 @@ def debug(msg):
     if DODEBUG:
         print msg
     
-def compose_speech(feat_dir_dict, base, stream_list, datadims):
+
+
+def compose_speech(feat_dir_dict, base, stream_list, datadims): 
     '''
     where there is trouble, signal this by returning a 1 x 1 matrix
     '''
@@ -706,10 +764,14 @@ def make_train_condition_name(config):
     condition name including any important hyperparams
     '''
     ### N-train_utts doesn't account for exclusions due to train_list, bad data etc. TODO - fix?
-    jstreams = '-'.join(config['stream_list_join'])
-    tstreams = '-'.join(config['stream_list_target'])
-    return '%s_utts_jstreams-%s_tstreams-%s_rep-%s'%(config['n_train_utts'], jstreams, tstreams, config.get('target_representation', 'twopoint'))
-
+    if config['joincost_features']:
+        jstreams = '-'.join(config['stream_list_join'])
+        tstreams = '-'.join(config['stream_list_target'])
+        return '%s_utts_jstreams-%s_tstreams-%s_rep-%s'%(config['n_train_utts'], jstreams, tstreams, config.get('target_representation', 'twopoint'))
+    else:        
+        streams = '-'.join(config['stream_list_target'])
+        return '%s_utts_streams-%s_rep-%s'%(config['n_train_utts'], streams, config.get('target_representation', 'twopoint'))
+        
 
 def read_label(labfile, quinphone_regex):
     '''
@@ -1093,6 +1155,19 @@ def pad_speech_to_length(speech, labels):
         speech = speech[:nframe,:]
 
     return speech
+
+
+
+def get_waveform_fragments(wave_fname, rate, context_length, nonlin_wave=True):
+    wave, fs = read_wave(wave_fname)
+    assert fs == rate
+    if nonlin_wave:
+        wave = lin2mu(wave)
+    wave = np.concatenate([np.zeros(context_length), wave])
+    frags = segment_axis(wave, context_length+1, overlap=context_length, axis=0)
+    context = frags[:,:-1]
+    next_sample = frags[:,-1].reshape((-1,1))
+    return (context, next_sample)
 
 
 if __name__ == '__main__':
