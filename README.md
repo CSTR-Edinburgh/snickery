@@ -250,9 +250,14 @@ And also:
 - what should active learning try to tune in this set up?
 
 
+## Selection of single samples
 
+An example config is given at `config/micro_test.cfg`. To train and synthesise:
 
-
+```
+python ./script/train_halfphone.py -c config/micro_test.cfg
+python ./script/synth_sample.py -c config/micro_test.cfg
+```
 
 
 
