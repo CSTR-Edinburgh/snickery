@@ -30,9 +30,9 @@ from const import label_delimiter, vuv_stream_names, label_length_diff_tolerance
 
 
 import resample
+import varying_filter
 
-
-
+NORMWAVE=False # False
 
 def locate_stream_directories(directories, streams): 
     '''
@@ -85,14 +85,14 @@ def main_work(config, overwrite_existing_data=False):
     stream_list_target = config['stream_list_target'] 
     ## get dicts mapping e.g. 'mgc': '/path/to/mgc/' : -
     target_stream_dirs = locate_stream_directories(target_feat_dirs, stream_list_target)
-
+    
     if config['joincost_features']:
         join_feat_dirs = config['join_datadirs']
         datadims_join = config['datadims_join']
         stream_list_join = config['stream_list_join']    
         ## get dicts mapping e.g. 'mgc': '/path/to/mgc/' : -
         join_stream_dirs   = locate_stream_directories(join_feat_dirs, stream_list_join)
-    
+        
     
     
     
@@ -144,6 +144,10 @@ def main_work(config, overwrite_existing_data=False):
         (mean_vec_join, std_vec_join) = get_mean_std(join_stream_dirs, stream_list_join, datadims_join, flist)
 
 
+    ## Get std of (transformed) waveform if doing sample synthesis
+    if config['target_representation'] == 'sample':
+        wave_mu_sigma = get_wave_mean_std(config['wav_datadir'], flist, config['sample_rate'], nonlin_wave=config['nonlin_wave'])
+
 
 
 
@@ -164,7 +168,7 @@ def main_work(config, overwrite_existing_data=False):
     if config['joincost_features']:    
         mean_join_dset[:] = mean_vec_join[:]
         std_join_dset[:] = std_vec_join[:]            
-        
+    
    
 
     ## Set some values....
@@ -212,8 +216,12 @@ def main_work(config, overwrite_existing_data=False):
     print '%s units (%s)'%(n_units,  config['target_representation'])
     
     ## 2) get ready to store data in HDF5:
+    total_target_dim = target_rep_size
+    if config['target_representation']  == 'sample': 
+        total_target_dim = config['wave_context_length'] + target_rep_size
+
     ## maxshape makes a dataset resizable
-    train_dset = f.create_dataset("train_unit_features", (n_units, config['wave_context_length'] + target_rep_size), maxshape=(n_units, config['wave_context_length'] + target_rep_size), dtype='f') 
+    train_dset = f.create_dataset("train_unit_features", (n_units, total_target_dim), maxshape=(n_units, total_target_dim), dtype='f') 
 
     if config['target_representation']  == 'sample': 
         #wavecontext_dset = f.create_dataset("wavecontext", (n_units, config['wave_context_length']), maxshape=(n_units,config['wave_context_length']), dtype='i') 
@@ -282,7 +290,7 @@ def main_work(config, overwrite_existing_data=False):
             nframes, _ = t_speech.shape
             ### orignally:
             #len_wave = int(config['sample_rate'] * fshift_seconds * nframes)
-            wavecontext, nextsample = get_waveform_fragments(wname, config['sample_rate'], config['wave_context_length'], nonlin_wave=config['nonlin_wave'])
+            wavecontext, nextsample = get_waveform_fragments(wname, config['sample_rate'], config['wave_context_length'], nonlin_wave=config['nonlin_wave'], norm=wave_mu_sigma, wave_context_type=config.get('wave_context_type', 0))
             len_wave, _ = wavecontext.shape
 
             t_speech = resample.upsample(len_wave, config['sample_rate'], fshift_seconds, t_speech, f0_dim=-1, convention='world')
@@ -463,6 +471,11 @@ def main_work(config, overwrite_existing_data=False):
     if config['target_representation'] == 'sample':
         # wavecontext_dset.resize(actual_nframes, axis=0)
         nextsample_dset.resize(actual_nframes, axis=0)
+
+
+        ## Store waveform standardisation info:
+        wave_mu_sigma_dset = f.create_dataset("wave_mu_sigma", np.shape(wave_mu_sigma), dtype='f')
+        wave_mu_sigma_dset[:] = wave_mu_sigma 
 
 
     print 
@@ -764,7 +777,7 @@ def make_train_condition_name(config):
     condition name including any important hyperparams
     '''
     ### N-train_utts doesn't account for exclusions due to train_list, bad data etc. TODO - fix?
-    if config['joincost_features']:
+    if not config['target_representation'] == 'sample':
         jstreams = '-'.join(config['stream_list_join'])
         tstreams = '-'.join(config['stream_list_target'])
         return '%s_utts_jstreams-%s_tstreams-%s_rep-%s'%(config['n_train_utts'], jstreams, tstreams, config.get('target_representation', 'twopoint'))
@@ -1158,16 +1171,95 @@ def pad_speech_to_length(speech, labels):
 
 
 
-def get_waveform_fragments(wave_fname, rate, context_length, nonlin_wave=True):
+def get_waveform_fragments(wave_fname, rate, context_length, nonlin_wave=True, norm=np.zeros((0)), wave_context_type=0):
+    '''
+    wave_context_type: 0 = 
+
+    if wave_context_type == 1: leftmost output values will correspond to rightmost (most recent) waeform samples  
+    '''
     wave, fs = read_wave(wave_fname)
     assert fs == rate
+
+    if wave_context_type == 0:
+        wavefrag_length = context_length
+    elif wave_context_type == 1:
+        DILATION_FACTOR = 1.2
+        filter_matrix = varying_filter.make_filter_01(DILATION_FACTOR, context_length)
+        wavefrag_length, nfeats = filter_matrix.shape
+        assert nfeats == context_length
+    else:
+        sys.exit('unknown wave_context_type: %s'%(wave_context_type))
+
+    wave = np.concatenate([np.zeros(wavefrag_length), wave])
+
+
+    # print 'Linear wave stats:'
+    # print wave.mean()
+    # print wave.std()
+
     if nonlin_wave:
         wave = lin2mu(wave)
-    wave = np.concatenate([np.zeros(context_length), wave])
-    frags = segment_axis(wave, context_length+1, overlap=context_length, axis=0)
+
+        # print 'Prenormed omed mulaw wave stats:'
+        # print wave.mean()
+        # print wave.std()
+        
+
+    if NORMWAVE:
+        if norm.size > 0:
+            assert norm.size == 2
+            (mu, sigma) = norm
+            # import pylab
+            # pylab.subplot(211)
+            # pylab.plot(wave)
+            #print type(wave[0])
+            wave = (wave - mu) / sigma
+            #print wave[:10]
+
+            # pylab.subplot(212)
+            # pylab.plot(wave)
+            # pylab.show()
+            #sys.exit('esdvsvsdfbv0000')
+            # print 'Nomed mulaw wave stats:'
+
+            # print wave.mean()
+            # print wave.std()
+            # print 'Normed with:'
+            # print (mu, sigma)
+            
+
+
+
+    frags = segment_axis(wave, wavefrag_length+1, overlap=wavefrag_length, axis=0)
     context = frags[:,:-1]
     next_sample = frags[:,-1].reshape((-1,1))
+
+    if wave_context_type > 0:
+        context = np.dot(context, filter_matrix)
+
+
     return (context, next_sample)
+
+
+def get_wave_mean_std(wav_datadir, flist, rate, nonlin_wave=True, nutts=100):
+    '''
+    By default, find mean and std of 1st 100 sentences only
+    '''
+    waves = []
+    for fname in flist[:min(nutts,len(flist))]:
+        wave_fname = os.path.join(wav_datadir, fname + '.wav')
+        wave, fs = read_wave(wave_fname)
+        assert fs == rate
+        if nonlin_wave:
+            wave = lin2mu(wave)
+        waves.append(wave)
+
+    waves = np.concatenate(waves)
+    mu = waves.mean()
+    sigma = waves.std()
+
+    return np.array([mu, sigma])
+    
 
 
 if __name__ == '__main__':
