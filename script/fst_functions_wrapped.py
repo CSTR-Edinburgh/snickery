@@ -37,8 +37,12 @@ def make_target_sausage_lattice(dist, ind):
     
         end = start + 1
         for j in range(cands):
+
+            frame_ix = ind[i,j]
             
-            frame_ix = ind[i,j] 
+            if frame_ix == -1:  ## this is a padding value because number of candidates was indufficient
+                continue 
+
             weight = dist[i,j] 
             fst.append('%s %s %s %s %s'%(start, end, frame_ix+1, frame_ix+1, weight)) 
             

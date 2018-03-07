@@ -224,9 +224,23 @@ if __name__=="__main__":
     print config
 
     from active_learning_join import JoinDatabaseForActiveLearning
-    o = JoinDatabaseForActiveLearning(opts.config_fname)
+    with JoinDatabaseForActiveLearning(opts.config_fname) as o:
 
+        ### A) initial pool
+        #### look at which candidates are really considered:-
+        ## o.analyse_candidate_types()
 
+        #### find k best joins for each unit:-
+        #### o.initialise_join_table_with_knn(100)
+
+        ### was this one:--
+        #o.initialise_join_table_with_heldout_data()
+        #o.run_al_session(initial=True)
+
+        o.exhaustive_check_experiment('/tmp/cand.npy')
+        #o.random_walk(1800, '/tmp/random_walk.wav')
+
+        print o
     # sys.exit('wvwrvwrv----------')
 
     # synth = Synthesiser(opts.config_fname)

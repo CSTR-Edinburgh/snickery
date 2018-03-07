@@ -16,7 +16,15 @@ from argparse import ArgumentParser
 # Cassia added
 import smoothing.fft_feats as ff
 import smoothing.libwavgen as lwg
-import smoothing.libaudio as la
+#import smoothing.libaudio as la
+
+
+# modify import path to obtain modules from the tools/magphase/src directory:
+snickery_dir = os.path.split(os.path.realpath(os.path.abspath(os.path.dirname(__file__))))[0]+'/'
+sys.path.append(os.path.join(snickery_dir, 'tool', 'magphase', 'src'))
+import magphase
+import libaudio as la
+
 
 import numpy as np
 import scipy
@@ -28,15 +36,15 @@ import pywrapfst as openfst
 import StashableKDTree
 
 from util import safe_makedir, vector_to_string, basename
-from speech_manip import read_wave, write_wave, weight
+from speech_manip import read_wave, write_wave, weight, get_speech
 from label_manip import break_quinphone, extract_monophone
-from train_halfphone import get_data_dump_name, compose_speech, standardise, \
+from train_halfphone import get_data_dump_name, compose_speech, standardise, destandardise, \
         read_label, get_halfphone_stats, reinsert_terminal_silence, make_train_condition_name, \
         locate_stream_directories
 
 DODEBUG=False ## print debug information?
 
-
+from segmentaxis import segment_axis
 from train_halfphone import debug
 
 from const import VERY_BIG_WEIGHT_VALUE
@@ -60,10 +68,50 @@ import cPickle as pickle
 
 # import matplotlib.pyplot as plt; plt.rcdefaults()
 # import matplotlib.pyplot as plt
-
+import pylab
 
 # verbose = False # True # False
 
+## TODO: where to put this?
+def zero_pad_matrix(a, start_pad, end_pad):
+    '''
+    if start_pad and end_pad are both 0, do nothing
+    '''
+    if start_pad > 0:
+        dim = a.shape[1] 
+        a = np.vstack([np.zeros((start_pad, dim)), a])
+    if end_pad > 0:
+        dim = a.shape[1] 
+        a = np.vstack([a, np.zeros((end_pad, dim))])
+    return a
+
+def taper_matrix(a, taper_length):
+    m,n = a.shape
+    assert taper_length * 2 <= m, 'taper_length (%s) too long for (padded) unit length (%s)'%(taper_length, m) 
+    in_taper = np.hanning(((taper_length + 1)*2)+1)[1:taper_length+1].reshape(-1,1)
+    out_taper = np.flipud(in_taper).reshape(-1,1)
+    if False:
+        pylab.plot(in_taper)
+        pylab.plot(out_taper)
+        pylab.plot((in_taper + out_taper)-0.05)   ### check sum to 1
+        pylab.show()
+        sys.exit('wrvwsfrbesbr')
+    a[:taper_length,:] *= in_taper
+    a[-taper_length:,:] *= out_taper
+    return a
+
+def lin_interp_f0(fz):
+    y = fz.flatten()
+
+    voiced_ix = np.where( y > 0.0 )[0]  ## equiv to np.nonzero(y)    
+    voicing_flag = np.zeros(y.shape)
+    voicing_flag[voiced_ix] = 1.0
+    
+    ## linear interp voiced:
+    interpolator = scipy.interpolate.interp1d(voiced_ix, y[voiced_ix], kind='linear', axis=0, \
+                                bounds_error=False, fill_value='extrapolate')
+    v_interpolated = interpolator(np.arange(y.shape[0]))
+    return (y.reshape((-1,1)), voicing_flag.reshape((-1,1)))
 
 
 def suppress_weird_festival_pauses(label, replace_list=['B_150'], replacement='pau'):
@@ -82,7 +130,7 @@ def suppress_weird_festival_pauses(label, replace_list=['B_150'], replacement='p
 
 class Synthesiser(object):
 
-    def __init__(self, config_file):
+    def __init__(self, config_file, holdout_percent=0.0):
 
 
 
@@ -130,14 +178,61 @@ class Synthesiser(object):
         self.std_vec_join = f["std_join"][:] 
 
         self.join_contexts_unweighted = f["join_contexts"][:,:]
+
+
+        if self.config.get('store_full_magphase', False):
+            self.mp_mag = f["mp_mag"][:] 
+            self.mp_imag = f["mp_imag"][:] 
+            self.mp_real = f["mp_real"][:] 
+            self.mp_fz = f["mp_fz"][:]                                     
+
+
+        if 'unit_index_within_sentence_dset' in f:
+            self.unit_index_within_sentence = f['unit_index_within_sentence_dset'][:]
+
         f.close()
 
         self.number_of_units, _ = self.train_unit_features_unweighted.shape
+
+        self.holdout_percent = holdout_percent
+        self.holdout_samples = 0
+        if holdout_percent > 0.0:
+            holdout_samples = int(self.number_of_units * (holdout_percent/100.0))
+            print 'holdout_samples:'
+            print holdout_samples
+            #holdout_indices = np.random.choice(m, size=npoint, replace=False)
+
+            if 0:
+                print 'check data all present...'
+                rwsum = self.train_unit_features_unweighted.sum(axis=1)
+                pylab.plot(rwsum)
+                pylab.show()
+                sys.exit('asdbvsrfbsfrb0000')
+
+            
+            self.train_unit_features_unweighted_dev = self.train_unit_features_unweighted[-holdout_samples:,:]
+            self.train_unit_features_unweighted = self.train_unit_features_unweighted[:-holdout_samples,:]
+        
+            self.train_unit_names_dev = self.train_unit_names[-holdout_samples:]
+            self.train_unit_names = self.train_unit_names[:-holdout_samples]
+
+            self.number_of_units -= holdout_samples
+            #sys.exit('evwservgwsrbv')
+            self.holdout_samples = holdout_samples
+
+
 
         if self.config.get('weight_target_data', True):
             self.set_target_weights(self.config['target_stream_weights'])
         if self.config.get('weight_join_data', True):
             self.set_join_weights(self.config['join_stream_weights'])
+
+        # if 'truncate_target_streams' in self.config:
+        #     self.truncate_target_streams(self.config['truncate_target_streams'])
+        # if 'truncate_join_streams' in self.config:
+        #     self.truncate_join_streams(self.config['truncate_join_streams'])
+
+
 
         self.first_silent_unit = 0 ## assume first unit is a silence, for v naive backoff
 
@@ -161,9 +256,10 @@ class Synthesiser(object):
         ## set up some shorthand:-
         self.tool = self.config['openfst_bindir']
 
+        self.waveforms = {}
         if self.config['hold_waves_in_memory']:
             print 'load waves into memory'
-            self.waveforms = {}
+            
             for base in np.unique(self.train_filenames):
 
                 print '.',
@@ -172,7 +268,10 @@ class Synthesiser(object):
                 self.waveforms[base] = wave
         print
 
-        assert self.config['preselection_method'] in ['acoustic', 'quinphone']
+        assert self.config['preselection_method'] in ['acoustic', 'quinphone', 'monophone_then_acoustic']
+
+
+
 
 
         if self.config.get('greedy_search', False):
@@ -223,8 +322,26 @@ class Synthesiser(object):
             self.stop_clock(start_time)
 
 
+        elif self.config['preselection_method'] == 'monophone_then_acoustic':
 
+            start_time = self.start_clock('build KD trees for search by phone')
+            self.phonetrees = {}
+            self.phonetrees_index_converters = {}
+            monophones = np.array([quinphone.split(const.label_delimiter)[2] for quinphone in self.train_unit_names])
+            monophone_inventory = dict(zip(monophones,monophones))
 
+            for phone in monophone_inventory:
+
+                train = self.train_unit_features[monophones==phone, :]
+                # print phone
+                # print (monophones==phone)
+                # print train.shape
+                tree = scipy.spatial.cKDTree(train, leafsize=10, compact_nodes=False, balanced_tree=False)
+                self.phonetrees[phone] = tree
+                self.phonetrees_index_converters[phone] = np.arange(self.number_of_units)[monophones==phone]
+            self.stop_clock(start_time)
+            # print self.phonetrees
+            # sys.exit('aedvsb')
         print 'Database loaded'
         print '\n\n----------\n\n'
 
@@ -253,6 +370,8 @@ class Synthesiser(object):
         self.prev_join_rep = self.unit_start_data[:,:n/2]       
         self.current_join_rep = self.unit_start_data[:,n/2:]
 
+
+
         start_time = self.start_clock('build/reload joint KD tree')
         ## Needs to be stored synthesis options specified (due to weights applied before tree construction):
         treefile = get_data_dump_name(self.config) + '_' + self.make_synthesis_condition_name() + '_joint_tree.pkl' 
@@ -263,9 +382,38 @@ class Synthesiser(object):
             #print 'Seems like this is first time synthesis has been run on this data.'
             #print 'Build a search tree which will be saved for future use'
 
+            multiepoch = self.config.get('multiepoch', 1)
+            if multiepoch > 1:
+                overlap = multiepoch-1
+                ### reshape target rep:
+                m,n = self.train_unit_features.shape
+                self.train_unit_features = segment_axis(self.train_unit_features, multiepoch, overlap=overlap, axis=0)
+                self.train_unit_features = self.train_unit_features.reshape(m-overlap,n*multiepoch)
+
+                if self.config.get('last_frame_as_target', False):
+                    print 'test -- take last frame only as target...'  ## TODO99
+                    # self.train_unit_features = self.train_unit_features[:,-n:]
+                    self.train_unit_features = np.hstack([self.train_unit_features[:,:n], self.train_unit_features[:,-n:]])
+
+                ### alter join reps: -- first tried taking first vs. last
+                m,n = self.current_join_rep.shape
+                self.current_join_rep = self.current_join_rep[overlap:,:]
+                self.prev_join_rep = self.prev_join_rep[:-overlap, :]
+
+                ### then, whole comparison for join:
+                # m,n = self.current_join_rep.shape
+                # self.current_join_rep = segment_axis(self.current_join_rep, multiepoch, overlap=overlap, axis=0).reshape(m-overlap,n*multiepoch)
+                # self.prev_join_rep = segment_axis(self.prev_join_rep, multiepoch, overlap=overlap, axis=0).reshape(m-overlap,n*multiepoch)
+
+
+            print self.prev_join_rep.shape
+            print self.train_unit_features.shape
             combined_rep = np.hstack([self.prev_join_rep, self.train_unit_features])
+            print combined_rep.shape
+            
+
             #self.report('make joint join + target tree...')
-            t = start_clock('make joint join + target tree...')
+            t = self.start_clock('make joint join + target tree...')
             ### scipy.spatial.cKDTree is used for joint tree instead of sklearn one due to
             ### speed of building. TODO: Also change in standard acoustic distance case (non-greedy).
             ### TODO: check speed and reliability of pickling, could look at HDF storage as 
@@ -301,6 +449,11 @@ class Synthesiser(object):
         self.unit_end_data = join_contexts_weighted[1:,:]
         self.unit_start_data = join_contexts_weighted[:-1,:]
 
+        if self.holdout_samples > 0:
+            self.unit_end_data = self.unit_end_data[:-self.holdout_samples,:]
+            self.unit_start_data = self.unit_start_data[:-self.holdout_samples,:]
+
+
         # print 'applied join_weight_vector'
         # print join_weight_vector
 
@@ -317,11 +470,65 @@ class Synthesiser(object):
         target_weight_vector = np.array(target_weight_vector * nrepetitions)   
         self.train_unit_features = weight(self.train_unit_features_unweighted, target_weight_vector)   
 
+        if self.holdout_samples > 0:
+            self.train_unit_features_dev = weight(self.train_unit_features_unweighted_dev, target_weight_vector)   
+
         ## save this so we can weight incoming predicted acoustics: 
         self.target_weight_vector = target_weight_vector
 
         # print 'applied taget_weight_vector'
         # print target_weight_vector
+
+    # def get_selection_vector(stream_list, stream_dims, truncation_values):
+    #     '''Return binary vector for selecting features by advanced indexing corresponding to the required truncation of streams'''
+    #     assert len(truncation_values) == len(stream_list), (truncation_values, stream_list)
+    #     dim = sum([stream_dims[stream] for stream in stream_list])
+    #     selection_vector = np.zeros(dim)
+    #     start = 0
+    #     for (stream, trunc) in zip(stream_list, truncation_values):
+    #         stream_dim = stream_dims[stream] 
+    #         if trunc != -1:                
+    #             assert trunc <= stream_dim
+    #             selection_vector[start:start+trunc] = 1
+    #         start += stream_dim  
+    #     return selection_vector     
+
+    def get_selection_vector(self, stream_list, stream_dims, truncation_values):
+        '''Return index list for selecting features by advanced indexing corresponding to the required truncation of streams'''
+        assert len(truncation_values) == len(stream_list), (truncation_values, stream_list)
+        selection_vector = []
+        start = 0
+        #print 'get_selection_vector'
+        for (stream, trunc) in zip(stream_list, truncation_values):
+            stream_dim = stream_dims[stream] 
+            #print (stream_dim, trunc)
+            if trunc == -1:
+                trunc = stream_dim
+            assert trunc <= stream_dim, 'stream %s has only %s dims, cannot truncate to %s'%(stream, stream_dim, trunc)
+            selection_vector.extend(range(start, start+trunc))
+            start += stream_dim  
+        #print len(selection_vector)
+        #print selection_vector
+        return selection_vector
+
+    def truncate_join_streams(self, truncation_values):
+        selection_vector = self.get_selection_vector(self.stream_list_join, self.datadims_join, truncation_values)
+
+        if self.config['target_representation'] == 'epoch':
+            ### for join streams, double up selection vector:
+            dim = sum([self.datadims_join[stream] for stream in self.stream_list_join])
+            selection_vector = selection_vector + [val + dim for val in selection_vector]
+
+        self.unit_end_data = self.unit_end_data[:, selection_vector]
+        self.unit_start_data = self.unit_start_data[:, selection_vector]
+        
+
+    def truncate_target_streams(self, truncation_values):
+        selection_vector = self.get_selection_vector(self.stream_list_target, self.datadims_target, truncation_values)
+        self.train_unit_features = self.train_unit_features[:, selection_vector]
+        if self.holdout_samples > 0:
+            self.train_unit_features_dev = self.train_unit_features_dev[:, selection_vector]
+        self.target_truncation_vector = selection_vector
 
     def test_concatenation_code(self):
         ofile = '/afs/inf.ed.ac.uk/user/o/owatts/temp/concat_test.wav'
@@ -349,7 +556,6 @@ class Synthesiser(object):
         flist = [basename(fname) for fname in flist]
 
         ## find all files containing one of the patterns in test_patterns
-        
         L = len(flist)
         selected_flist = []
         for (i,fname) in enumerate(flist):
@@ -359,6 +565,18 @@ class Synthesiser(object):
                         selected_flist.append(fname)
                     
         flist = selected_flist 
+
+        ## check sentences not in training:
+        if 1:
+            train_names = dict(zip(self.train_filenames, self.train_filenames))
+            selected_flist = []
+            for name in flist:
+                if name in train_names:
+                    print 'Warning: %s in train utternances!'%(name)
+                else:
+                    selected_flist.append(name)
+            flist = selected_flist 
+
 
         ### Only synthesise n sentences:
         if limit > 0:
@@ -402,7 +620,7 @@ class Synthesiser(object):
 
 
 
-    def synth_from_config(self, inspect_join_weights_only=False, synth_type='test'):
+    def synth_from_config(self, inspect_join_weights_only=False, synth_type='test', outdir=''):
 
         self.report('synth_from_config')
 
@@ -432,7 +650,7 @@ class Synthesiser(object):
             # else:    
 
 
-            self.synth_utt(fname, synth_type=synth_type)    
+            self.synth_utt(fname, synth_type=synth_type, outdir=outdir)    
 
         # if self.mode_of_operation == 'stream_weight_balancing':
         #     all_tscores = np.vstack(all_tscores)
@@ -606,7 +824,8 @@ def get_facts(vals):
                         jct,
                         nc,
                         tl
-                    )            
+                    )    
+            name += 'multiepoch-%s'%(self.config.get('multiepoch', 1))        
         return name
 
 
@@ -863,7 +1082,10 @@ def get_facts(vals):
 
 
     def preselect_units_quinphone(self, unit_features, unit_names):
-
+        '''
+        NB: where candidates are too few, returned matrices are padded with
+        -1 entries 
+        '''
         start_time = self.start_clock('Preselect units ')
         #candidates = np.ones((n_units, self.config['n_candidates'])) * -1
         candidates = []
@@ -880,7 +1102,7 @@ def get_facts(vals):
                     break
             if len(current_candidates) == 0:
                 print 'Warning: no cands in training data to match %s! Use v naive backoff to silence...'%(quinphone)
-                current_candidates = [self.first_silent_unit]
+                current_candidates = [1] # [self.first_silent_unit]
                 ## TODO: better backoff
                 #sys.exit('no cands in training data to match %s! TODO: add backoff...'%(quinphone))
 
@@ -922,7 +1144,36 @@ def get_facts(vals):
         self.stop_clock(start_time) 
         return (candidates, distances)
 
-      
+
+    def preselect_units_monophone_then_acoustic(self, unit_features, unit_names):
+        '''
+        NB: where candidates are too few, returned matrices are padded with
+        -1 entries 
+        '''
+        start_time = self.start_clock('Preselect units ')
+    
+        m,n = unit_features.shape
+        candidates = np.ones((m, self.config['n_candidates']), dtype=int) * -1
+        distances = np.ones((m, self.config['n_candidates'])) * const.VERY_BIG_WEIGHT_VALUE
+
+        monophones = np.array([quinphone.split(const.label_delimiter)[2] for quinphone in unit_names])
+        assert len(monophones) == m, (len(monophones), m)
+        for (i,phone) in enumerate(monophones):
+            assert phone in self.phonetrees, 'unseen monophone %s'%(phone)
+            current_distances, current_candidates = self.phonetrees[phone].query(unit_features[i,:], k=self.config['n_candidates'])
+            mapped_candidates = self.phonetrees_index_converters[phone][current_candidates]
+            candidates[i,:current_distances.size] = mapped_candidates
+            distances[i,:current_distances.size] = current_distances
+
+            # current_distances = current_distances.flatten()
+            # current_candidates = current_candidates.flatten()
+            # if len(current_candidates) != self.config['n_candidates']:
+            #     difference = self.config['n_candidates'] - len(current_candidates) 
+            #     current_candidates = np.concatenate([ current_candidates , np.ones(difference)*-1.0])
+            #     current_distances = np.concatenate([ current_distances , np.zeros(difference)])
+
+        return (candidates, distances)
+
 
     def viterbi_search(self, candidates, distances):
 
@@ -937,7 +1188,11 @@ def get_facts(vals):
         else:
             ### compile J directly without writing to text. In fact doesn't save much time...
             J = self.make_on_the_fly_join_lattice_BLOCK_DIRECT(candidates)
-            
+        
+        if 0:
+            T.draw('/tmp/T.dot')
+            J.draw('/tmp/J.dot')
+            sys.exit('stop here 9893487t3')
 
         start_time = self.start_clock('Compose and find shortest path')  
         if not self.precomputed_joincost:   
@@ -1004,7 +1259,7 @@ def get_facts(vals):
 
 
 
-    def synth_utt(self, base, synth_type='tune', outstem=''): 
+    def synth_utt(self, base, synth_type='tune', outstem='', outdir=''): 
 
         if synth_type == 'test':
             data_dirs = self.test_data_target_dirs
@@ -1015,10 +1270,16 @@ def get_facts(vals):
         else:
             sys.exit('Unknown synth_type  9489384')
 
+        if outdir:
+            assert not outstem
+
         if not outstem:
             train_condition = make_train_condition_name(self.config)
             synth_condition = self.make_synthesis_condition_name()
-            synth_dir = os.path.join(self.config['workdir'], 'synthesis_%s'%(synth_type), train_condition, synth_condition)
+            if outdir:
+                synth_dir = outdir
+            else:
+                synth_dir = os.path.join(self.config['workdir'], 'synthesis_%s'%(synth_type), train_condition, synth_condition)
             safe_makedir(synth_dir)
                 
             self.report('               ==== SYNTHESISE %s ===='%(base))
@@ -1027,17 +1288,20 @@ def get_facts(vals):
             self.report('               ==== SYNTHESISE %s ===='%(outstem))
 
         start_time = self.start_clock('Get speech ')
-        speech = compose_speech(data_dirs, base, self.stream_list_target, \
+        unnorm_speech = compose_speech(data_dirs, base, self.stream_list_target, \
                                 self.config['datadims_target']) 
 
 
         #speech = speech[20:80,:]
 
-        m,dim = speech.shape
+        m,dim = unnorm_speech.shape
 
         if (self.config['standardise_target_data'], True):                                
-            speech = standardise(speech, self.mean_vec_target, self.std_vec_target)         
-        
+            speech = standardise(unnorm_speech, self.mean_vec_target, self.std_vec_target)         
+        else:
+            speech = unnorm_speech
+
+
         #fshift_seconds = (0.001 * self.config['frameshift_ms'])
         #fshift = int(self.config['sample_rate'] * fshift_seconds)        
 
@@ -1054,11 +1318,31 @@ def get_facts(vals):
                 labs = suppress_weird_festival_pauses(labs)
 
             unit_names, unit_features, unit_timings = get_halfphone_stats(speech, labs, representation_type=self.target_representation)
-           
+
+            if 0: ## debug -- take first few units only 989
+                N= 20
+                unit_names = unit_names[15:20]
+                unit_features = unit_features[15:20, :]
+                unit_timings = unit_timings[15:20]
+
+
         if self.config['weight_target_data']:                                
             unit_features = weight(unit_features, self.target_weight_vector)       
 
+        # if hasattr(self, 'target_truncation_vector'):
+        #     print 'truncate target streams...'
+        #     print unit_features.shape
+        #     unit_features = unit_features[:, self.target_truncation_vector]
+        #     print unit_features.shape
+        #     sys.exit('wewevws000')
+
         n_units, _ = unit_features.shape
+
+        # print unit_features.shape
+        # print unit_names
+        # print unit_names.shape
+        # sys.exit('efvsedv000')
+
         self.stop_clock(start_time)
 
         if self.config.get('greedy_search', False):
@@ -1074,9 +1358,15 @@ def get_facts(vals):
                 (candidates, distances) = self.preselect_units_acoustic(unit_features)
             elif self.config['preselection_method'] == 'quinphone':
                 (candidates, distances) = self.preselect_units_quinphone(unit_features, unit_names)
+            elif self.config['preselection_method'] == 'monophone_then_acoustic':
+                (candidates, distances) = self.preselect_units_monophone_then_acoustic(unit_features, unit_names)                
             else:
                 sys.exit('preselection_method unknown')
 
+            if 0:
+                print candidates
+                print distances
+                sys.exit('aefegvwrbetbte98456549')
 
             if self.mode_of_operation == 'find_join_candidates':
                 print 'mode_of_operation == find_join_candidates: return here'
@@ -1089,27 +1379,58 @@ def get_facts(vals):
 
 
             best_path = self.viterbi_search(candidates, distances)
-     
+            
+
+
+
         if self.mode_of_operation == 'stream_weight_balancing':
             self.report('' )
             self.report( 'balancing stream weights -- skip making waveform')
             self.report('' )
         else:
+
+            PRELOAD_UTTS = False
+            if PRELOAD_UTTS:
+                start_time = self.start_clock('Preload magphase utts for sentence')
+                self.preload_magphase_utts(best_path)
+                self.stop_clock(start_time) 
+
             start_time = self.start_clock('Extract and join units')
             # if self.config['target_representation'] == 'epoch':
             #     self.concatenate_epochs(best_path, outstem + '.wav')
             #     #self.make_epoch_labels(best_path, outstem + '.lab')   ### !!!!
 
-            if self.config.get('synth_smooth', False) and not (self.config['target_representation'] == 'epoch'):
-                print "Smooth output"
-                self.concatenateMagPhase(best_path, outstem + '.wav')
+            if self.config.get('store_full_magphase_sep_files', False):
+                assert self.config['target_representation'] == 'epoch'
+                target_fz = unnorm_speech[:,-1]
+                target_fz = np.exp(target_fz)
+                magphase_overlap = self.config.get('magphase_overlap', 0)
+
+
+                if self.config.get('magphase_use_target_f0', True):
+                    self.concatenateMagPhaseEpoch_sep_files(best_path, outstem + '.wav', fzero=target_fz, overlap=magphase_overlap)                
+                else:
+                    self.concatenateMagPhaseEpoch_sep_files(best_path, outstem + '.wav', overlap=magphase_overlap)                
+
+            elif self.config.get('store_full_magphase', False):
+                target_fz = unnorm_speech[:,-1]
+                target_fz = np.exp(target_fz)
+                self.concatenateMagPhaseEpoch(best_path, outstem + '.wav', fzero=target_fz)
             else:
-                print "Does not smooth output"
-                self.concatenate(best_path, outstem + '.wav')
+                if self.config.get('synth_smooth', False) and not (self.config['target_representation'] == 'epoch'):
+                    print "Smooth output"
+                    self.concatenateMagPhase(best_path, outstem + '.wav')
+                else:
+                    print "Does not smooth output"
+                    self.concatenate(best_path, outstem + '.wav')
             self.stop_clock(start_time)          
             self.report( 'Output wave: %s.wav'%(outstem ))
             self.report('')
             self.report('')
+
+        print 'path info:'
+        print self.train_unit_names[best_path].tolist()
+
 
         target_features = unit_features ## older nomenclature?
         if self.mode_of_operation == 'stream_weight_balancing':
@@ -1323,6 +1644,7 @@ def get_facts(vals):
 
 
     def greedy_joint_search(self, unit_features, start_state=-1, holdout=[]):
+
         assert self.config['target_representation'] == 'epoch'
 
         start_time = self.start_clock('Greedy search')
@@ -1334,6 +1656,20 @@ def get_facts(vals):
             prev_join_vector = np.zeros((n,))
         else:
             prev_join_vector = self.prev_join_rep[start_state, :]
+
+
+        multiepoch = self.config.get('multiepoch', 1)
+        if multiepoch > 1:
+            ### reshape target rep:
+            m,n = unit_features.shape
+            unit_features = segment_axis(unit_features, multiepoch, overlap=0, axis=0)
+            unit_features = unit_features.reshape(m/multiepoch,n*multiepoch)
+
+            if self.config.get('last_frame_as_target', False):
+                print 'test -- take last frame only as target...'  ## TODO99
+                # unit_features = unit_features[:,-n:]
+                unit_features = np.hstack([unit_features[:,:n], unit_features[:,-n:]])
+
 
         #current_join_rep = self.join_contexts_unweighted[:-1,n/2:] ## all but last frame 
         #current_join_rep *= 0.3
@@ -1622,7 +1958,7 @@ def get_facts(vals):
         for quinphone in unit_names:
             current_candidates = []
             mono, diphone, triphone, quinphone = break_quinphone(quinphone) 
-            for form in [quinphone, triphone, diphone, mono]:
+            for form in [mono]: # [quinphone, triphone, diphone, mono]:
                 for unit in self.unit_index.get(form, []):
                     current_candidates.append(unit)
                     if len(current_candidates) == self.config['n_candidates']:
@@ -1660,7 +1996,8 @@ def get_facts(vals):
 
 
     def retrieve_speech_OLD(self, index):
-        if self.config['hold_waves_in_memory']:
+        #if self.config['hold_waves_in_memory']:  TODO work out config
+        if self.train_filenames[index] in self.waveforms:
             wave = self.waveforms[self.train_filenames[index]]  
         else:     
             wavefile = os.path.join(self.config['wav_datadir'], self.train_filenames[index] + '.wav')
@@ -1700,7 +2037,7 @@ def get_facts(vals):
 
     def retrieve_speech(self, index):
 
-        if self.config['hold_waves_in_memory']:
+        if self.train_filenames[index] in self.waveforms:
             wave = self.waveforms[self.train_filenames[index]]  
         else:     
             wavefile = os.path.join(self.config['wav_datadir'], self.train_filenames[index] + '.wav')
@@ -1776,18 +2113,30 @@ def get_facts(vals):
     def retrieve_speech_epoch_new(self, index):
 
         ## TODO: see copy.copy below --- make sure copy with other configureations, otherwise 
-                                            ## in the case hold_waves_in_memory we disturb original audio which is reused
+                                            ## in the case hold_waves_in_memory we disturb original audio which is reused -- TODO -- use this elsewhere too
 
-        if self.config['hold_waves_in_memory']:
+        if self.train_filenames[index] in self.waveforms:
             orig_wave = self.waveforms[self.train_filenames[index]]  
         else:     
             wavefile = os.path.join(self.config['wav_datadir'], self.train_filenames[index] + '.wav')
             print wavefile
             orig_wave, sample_rate = read_wave(wavefile)
+            self.waveforms[self.train_filenames[index]]  = orig_wave
         T = len(orig_wave)        
         (start,middle,end) = self.train_cutpoints[index]
 
+
+        multiepoch = self.config.get('multiepoch', 1)
+        if multiepoch > 1:
+            (start_ii,middle,end_ii) = self.train_cutpoints[index + (multiepoch-1)]
+
+
         end = middle  ## just use first half of fragment (= 1 epoch)
+
+
+
+
+
         wave = copy.copy(orig_wave)              
 
         taper = self.config['taper_length']
@@ -1815,6 +2164,125 @@ def get_facts(vals):
 
         return frag
  
+
+    def preload_magphase_utts(self, path):
+        HALFFFTLEN = 513  ## TODO
+        for index in path:
+            if self.train_filenames[index] in self.waveforms: # self.config['hold_waves_in_memory']:  ### i.e. waves or magphase FFT spectra
+                (mag_full, real_full, imag_full, f0_interp, vuv) = self.waveforms[self.train_filenames[index]]  
+            else:     
+                mag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'mag_full', self.train_filenames[index] + '.mag'), HALFFFTLEN)
+                real_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'real_full',  self.train_filenames[index] + '.real'), HALFFFTLEN)
+                imag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'imag_full',  self.train_filenames[index] + '.imag'), HALFFFTLEN)
+                f0_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'f0_full',  self.train_filenames[index] + '.f0'), 1)            
+                f0_interp, vuv = lin_interp_f0(f0_full)
+                self.waveforms[self.train_filenames[index]] = (mag_full, real_full, imag_full, f0_interp, vuv)
+
+
+
+    def retrieve_magphase_frag(self, index, extra_frames=0):
+        HALFFFTLEN = 513  ## TODO
+
+        if 1:
+            print 'retrieving fragment'
+            print self.train_filenames[index]
+            print self.unit_index_within_sentence[index]
+
+        ## side effect -- data persists in self.waveforms. TODO: Protect against mem errors
+        if self.train_filenames[index] in self.waveforms: # self.config['hold_waves_in_memory']:  ### i.e. waves or magphase FFT spectra
+            (mag_full, real_full, imag_full, f0_interp, vuv) = self.waveforms[self.train_filenames[index]]  
+        else:     
+            mag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'mag_full', self.train_filenames[index] + '.mag'), HALFFFTLEN)
+            real_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'real_full',  self.train_filenames[index] + '.real'), HALFFFTLEN)
+            imag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'imag_full',  self.train_filenames[index] + '.imag'), HALFFFTLEN)
+            f0_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'f0_full',  self.train_filenames[index] + '.f0'), 1)            
+            f0_interp, vuv = lin_interp_f0(f0_full)
+            self.waveforms[self.train_filenames[index]] = (mag_full, real_full, imag_full, f0_interp, vuv)
+
+        start_index = self.unit_index_within_sentence[index]
+        #start_index -= 1  ### because magphase have extra pms beginning and end
+        multiepoch = self.config.get('multiepoch', 1)
+        end_index = start_index + multiepoch
+
+        ## 
+        start_pad = 0
+        end_pad = 0        
+        if extra_frames > 0:
+            new_start_index = start_index - extra_frames
+            new_end_index = end_index + extra_frames
+
+            ## check out of bounds and record to zero pad later if necessary:
+            nframes, _ = mag_full.shape
+
+            if new_start_index < 0:
+                start_pad = new_start_index * -1
+            if new_end_index > nframes:
+                end_pad = new_end_index - nframes 
+
+            if start_pad > 0:
+                start_index = 0
+            else:
+                start_index = new_start_index
+
+            if end_pad > 0:
+                end_index = nframes
+            else:
+                end_index = new_end_index
+
+        if 0:
+            print '-----indices:  '
+            print start_index, end_index
+            print end_index - start_index
+            print mag_full.shape
+
+        mag_frag = mag_full[start_index:end_index, :]
+        real_frag = real_full[start_index:end_index, :]
+        imag_frag = imag_full[start_index:end_index, :]
+        f0_frag = f0_interp[start_index:end_index, :]
+        vuv_frag = vuv[start_index:end_index, :]
+
+ 
+
+
+        # print mag_frag.shape
+
+        ### add zero padding where :
+        mag_frag = zero_pad_matrix(mag_frag, start_pad, end_pad)
+        real_frag = zero_pad_matrix(real_frag, start_pad, end_pad)
+        imag_frag = zero_pad_matrix(imag_frag, start_pad, end_pad)
+        f0_frag = zero_pad_matrix(f0_frag, start_pad, end_pad)
+        vuv_frag = zero_pad_matrix(vuv_frag, start_pad, end_pad)
+        # print mag_frag.shape
+
+        # print '======'
+        # print extra_frames
+        
+        # print new_start_index
+        # print new_end_index
+
+        # print start_pad
+        # print end_pad
+
+
+        ## sanity check dimensions
+        m,n = mag_frag.shape
+        if 0:
+            print multiepoch
+            print extra_frames
+            print m
+        assert m == multiepoch + (extra_frames*2)
+
+
+        ### add taper (weighting for cross-fade):
+        if extra_frames > 0:
+            mag_frag = taper_matrix(mag_frag, extra_frames*2)
+            real_frag = taper_matrix(real_frag, extra_frames*2)
+            imag_frag = taper_matrix(imag_frag, extra_frames*2)
+            f0_frag = taper_matrix(f0_frag, extra_frames*2) 
+            vuv_frag = taper_matrix(vuv_frag, extra_frames*2)            
+
+
+        return (mag_frag, real_frag, imag_frag, f0_frag, vuv_frag)
 
 
     def concatenate(self, path, fname):
@@ -1948,7 +2416,92 @@ def get_facts(vals):
             frags['src_end_sec'].append(end / float(fs))
 
         synth_wave = lwg.wavgen_improved_just_slope(frags, wav_dir, pm_reaper_dir, nfft, fs, npm_margin=3, diff_mf_tres=25, f0_trans_nfrms_btwn_voi=8)
-        la.write_audio_file(fname, synth_wave, fs, norm=False)
+        la.write_audio_file(fname, synth_wave, fs, norm=True)
+
+    def concatenateMagPhaseEpoch(self, path, fname, fzero=np.zeros(0)):
+
+        print path
+        print fzero
+        print '------'
+        mag = self.mp_mag[path,:] 
+        imag = self.mp_imag[path,:] 
+        real = self.mp_real[path,:] 
+        fz = self.mp_fz[path,:].reshape((-1,1))
+
+        if fzero.size > 0:
+            fz = fzero
+
+        # import pylab
+        # pylab.plot(mag)
+        # pylab.show()
+        # sys.exit('aevsdb0000s')
+
+        syn_wave = magphase.synthesis_from_lossless(mag, real, imag, fz, 48000)
+        la.write_audio_file(fname, syn_wave, 48000)
+
+
+    def concatenateMagPhaseEpoch_sep_files(self, path, fname, fzero=np.zeros(0), overlap=0):
+        assert overlap % 2 == 0, 'frame overlap should be even number'
+
+        FFTHALFLEN = 513 # TODO
+
+
+        multiepoch = self.config.get('multiepoch', 1)
+        nframes = len(path) * multiepoch
+        nframes += overlap ## beginning and ending fade in and out -- can trim these after
+
+        mag = np.zeros((nframes, FFTHALFLEN))
+        real = np.zeros((nframes, FFTHALFLEN))
+        imag = np.zeros((nframes, FFTHALFLEN))
+        fz = np.zeros((nframes, 1))
+        vuv = np.zeros((nframes, 1))
+
+        write_start = 0
+        for ix in path:
+            
+            write_end = write_start + multiepoch + overlap
+            (mag_frag, real_frag, imag_frag, fz_frag, vuv_frag) = self.retrieve_magphase_frag(ix, extra_frames=overlap/2)
+            mag[write_start:write_end, :] += mag_frag
+            real[write_start:write_end, :] += real_frag
+            imag[write_start:write_end, :] += imag_frag
+            #fz[write_start+(overlap/2):write_end-(overlap/2), :] += fz_frag[(overlap/2):-(overlap/2),:]
+            fz[write_start:write_end, :] += fz_frag
+            vuv[write_start:write_end, :] += vuv_frag
+
+            write_start += multiepoch
+
+        ## trim beginning fade in and end fade out:
+        if overlap > 0:
+            taper = overlap / 2
+            mag = mag[taper:-taper, :]
+            real = real[taper:-taper, :]
+            imag = imag[taper:-taper, :]
+            fz = fz[taper:-taper, :]
+            vuv = vuv[taper:-taper, :]
+
+        if fzero.size > 0:
+            fz = fzero
+        else:
+            unvoiced = np.where(vuv < 0.5)[0]
+            fz[unvoiced, :] = 0.0
+
+        if 0:
+            import pylab
+            pylab.imshow( mag)
+            pylab.show()
+
+
+
+        if 0:
+            import pylab
+            pylab.plot(fz)
+            pylab.show()
+            sys.exit('evevwev9999')
+
+        syn_wave = magphase.synthesis_from_lossless(mag, real, imag, fz, 48000)
+        la.write_audio_file(fname, syn_wave, 48000)
+  
+        
 
     def get_natural_distance(self, first, second, order=2):
         '''
@@ -2501,8 +3054,79 @@ def get_facts(vals):
         stop_clock(t)
 
 
+    def oracle_synthesis_holdout(self, outfname, start, length):
+        t = self.start_clock('oracle_synthesis_holdout')
+
+        assert start >= 0
+        assert start + length < self.holdout_samples
+
+        assert self.config['store_full_magphase_sep_files']
+
+        magphase_overlap = self.config.get('magphase_overlap', 0)
+
+        unit_features = self.train_unit_features_dev[start:start+length, :]
+        
+                
+        # recover target F0:
+        unit_features_no_weight = self.train_unit_features_unweighted_dev[start:start+length, :]
+        unnorm_speech = destandardise(unit_features_no_weight, self.mean_vec_target, self.std_vec_target)   
+        target_fz = unnorm_speech[:,-1] ## TODO: do not harcode F0 postion
+        target_fz = np.exp(target_fz).reshape((-1,1))
+        ### TODO: nUV is : 88.62008057.      This breaks resynthesis for some reason...
+        
+        target_fz[target_fz<90] = 0.0
+        #target_fz *= 20.0
+        #print target_fz
+
+        #target_fz = np.ones((unit_features.shape[0], 1)) * 50 # 88.62  ## monotone 300 hz
+
+        best_path = self.greedy_joint_search(unit_features)
+
+        if self.config.get('magphase_use_target_f0', True):
+            self.concatenateMagPhaseEpoch_sep_files(best_path, outfname, fzero=target_fz, overlap=magphase_overlap)                
+        else:
+            self.concatenateMagPhaseEpoch_sep_files(best_path, outfname, overlap=magphase_overlap) 
+
+        self.stop_clock(t)     
+
+        print 'path info:'
+        print self.train_unit_names[best_path].tolist()
 
 
+
+
+
+    def natural_synthesis_holdout(self, outfname, start, length):
+        if 0:
+            print outfname
+            print start
+            print length
+            print 
+        t = self.start_clock('natural_synthesis_holdout')
+        assert start >= 0
+        assert start + length < self.holdout_samples
+        assert self.config['store_full_magphase_sep_files']
+        magphase_overlap = 0
+        multiepoch = self.config.get('multiepoch', 1)
+        natural_path = np.arange(start, start+length, multiepoch) + self.number_of_units ## to get back to pre-hold-out indexing
+        self.concatenateMagPhaseEpoch_sep_files(natural_path, outfname, overlap=0)                
+        self.stop_clock(t)     
+
+   
+    def get_heldout_frag_starts(self, sample_pool_size, frag_length, filter_silence=''):
+        n_frag_frames = sample_pool_size * frag_length
+        assert n_frag_frames <= self.holdout_samples, 'not enough held out data to generate frags, try incresing holdout_percent or decreasing sample_pool_size'
+        
+        if filter_silence:
+            sys.exit('Still to implement filter_silence')
+            frags = segment_axis(self.train_unit_names_dev[:n_frag_frames], frag_length, overlap=0, axis=0)
+            pause_sums = (frags==filter_silence) # , dtype=int).sum(axis=1)
+            percent_silent = pause_sums / frag_length
+            print percent_silent
+
+        starts = np.arange(0, n_frag_frames, frag_length)
+        selected_starts = np.random.choice(starts, sample_pool_size, replace=False)
+        return selected_starts
 
 
 if __name__ == '__main__':
@@ -2513,6 +3137,7 @@ if __name__ == '__main__':
 
     a = ArgumentParser()
     a.add_argument('-c', dest='config_fname', required=True)
+    a.add_argument('-o', dest='output_dir', required=False, default='')
     opts = a.parse_args()
 
 
@@ -2520,6 +3145,10 @@ if __name__ == '__main__':
     #synth.test_concatenation_code()
     
     #synth.synth_from_config()
+    if opts.output_dir:
+        if not os.path.isdir(opts.output_dir):
+            os.makedirs(opts.output_dir)
+        os.system('cp %s %s'%(opts.config_fname, opts.output_dir))
 
-    synth.synth_from_config(inspect_join_weights_only=False, synth_type='test')
+    synth.synth_from_config(inspect_join_weights_only=False, synth_type='test', outdir=opts.output_dir)
 

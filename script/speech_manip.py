@@ -12,7 +12,7 @@ import wave
 
 
 
-def write_wave(v, fname, rate, quiet=False):
+def write_wave(v, fname, rate, quiet=True):
 
     ## to avoid this when packing data:
        # struct.error: short format requires SHRT_MIN <= number <= SHRT_MAX
@@ -88,7 +88,7 @@ def extract_portion(infile, old_dim, new_dim_start, new_dim_width, remove_htk_he
     return new_data
 
 
-def get_speech(infile, dim, remove_htk_header=False):
+def get_speech_OLD(infile, dim, remove_htk_header=False):
 
     data = read_floats(infile)
     if remove_htk_header:
@@ -97,6 +97,17 @@ def get_speech(infile, dim, remove_htk_header=False):
     assert len(data) % float(dim) == 0,"%s -- Bad dimension: %s!"%(infile, dim)
     m = len(data) / dim
     data = array(data).reshape((m,dim))
+    return data
+
+def get_speech(infile, dim, remove_htk_header=False):
+
+    f = open(infile, 'rb')
+    data = np.fromfile(f, dtype=np.float32)
+    f.close()
+    if remove_htk_header:
+        data = data[3:]  ## 3 floats correspond to 12 byte htk header
+    assert data.size % float(dim) == 0.0,'specified dimension %s not compatible with data'%(dim)
+    data = data.reshape((-1, dim))
     return data
 
 def put_speech(data, outfile):

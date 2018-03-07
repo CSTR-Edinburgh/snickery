@@ -18,6 +18,8 @@ class DataProvider(object):
     def __init__(self, input_dir_list, input_extensions, batch_size=32, partition_size=100000, \
             shuffle=True, testpattern='', validation=False, limit_files=0):
 
+        print input_dir_list
+        
         self.partition_size = partition_size
         self.input_dir_list = input_dir_list
         self.filelist = self.get_filelist(input_dir_list, input_extensions)
@@ -34,6 +36,7 @@ class DataProvider(object):
         valid_len = int(len(self.filelist)*0.05)  ##  95% for training, 5% for validation
         if valid_len == 0:
             valid_len = 1
+        print self.filelist
         train_len = len(self.filelist) - valid_len
         assert train_len > 0
         # print train_len
@@ -61,12 +64,15 @@ class DataProvider(object):
         self.reset()
 
         self.n_points = self.get_n_examples()
-        self.n_batches = self.n_points / self.batch_size
 
         if self.partition_size > self.n_points:
             print 'reducing partition_size -- too few points!'
             self.partition_size = self.n_points
+        if self.batch_size > self.n_points:
+            print 'reducing batch size -- too few points!'
+            self.batch_size = self.n_points
 
+        self.n_batches = self.n_points / self.batch_size
 
     def get_filelist(self, input_dir_list, input_extensions):
         filelist = []
@@ -92,7 +98,7 @@ class DataProvider(object):
             random.shuffle(self.filelist)
 
     def populate_partition(self):
-        #print '======populate_partition (%s)'%(self.operation)
+        print '======populate_partition (%s)'%(self.operation)
         new_partition_data = [[] for i in self.input_dir_list] 
 
         ## keep any existing partition data:
@@ -101,6 +107,7 @@ class DataProvider(object):
                 new_partition_data[i].append(data)
 
         while self.points_in_partition < self.partition_size:
+            print self.points_in_partition
             file_data_list = self.get_file_data_from_one_file()
             self.file_index += 1
             if self.file_index==len(self.filelist):

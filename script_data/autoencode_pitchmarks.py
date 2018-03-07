@@ -115,17 +115,25 @@ class PitchPeriodProvider(DataProvider):
         This will work OK, but can be overridden with something more efficient
         which just needs to work out data size without returning it.
         '''
-        data = self.get_file_data_from_one_file()
-        return data[0].shape[0]
+        (wave_file, pitch_mark_file) = self.filelist[self.file_index]
+        pitchmarks = read_pm(pitch_mark_file) 
+        if pitchmarks.size==1:
+            return 0
+        else:
+            print len(pitchmarks) - 2   
+            return len(pitchmarks) - 2     
+
 
     def get_file_data_from_one_file(self):
         '''
         Here is most of the database specific stuff.
         This one should be provided by subclasses to manipulate data appropriately.
         '''
-        print '----> get_file_data_from_one_file (%s)'%(self.operation)
+        #print '----> get_file_data_from_one_file (%s)'%(self.operation)
         (wave_file, pitch_mark_file) = self.filelist[self.file_index]
         pitchmarks = read_pm(pitch_mark_file) * 48000
+        if pitchmarks.size==1:
+            return (np.zeros((0,0)), np.zeros((0,0)))
         pitchmarks = np.array(pitchmarks, dtype='int')
         pitchmark_triples = segment_axis(pitchmarks, 3, 2, axis=0)
         wave, sample_rate = read_wave(wave_file)
@@ -142,55 +150,89 @@ class PitchPeriodProvider(DataProvider):
         return (frags, frags)
 
 
-TOPDIR='/afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data/'
-
-### 48k, mono, 16-bit wav-headered audio:
-wav_datadir = '/afs/inf.ed.ac.uk/group/cstr/projects/blizzard_entries/blizzard2017/data/segmented/wav/'
-
-### Reaper pitchmarks:
-pm_datadir = TOPDIR + '/world_reaper/pm/'
 
 
 
-
-
-train_provider = PitchPeriodProvider([wav_datadir, pm_datadir], ['wav', 'pm'], batch_size=32, partition_size=1000, \
-            shuffle=True, limit_files=5)
-val_provider = PitchPeriodProvider([wav_datadir, pm_datadir], ['wav', 'pm'],  batch_size=32, partition_size=1000, \
-            shuffle=True, limit_files=5, validation=True)
-(X, Y) = train_provider.get_next_batch()
-
-# import pylab
-# pylab.plot(X.transpose())
-# pylab.show()
-
-train_provider.reset()
-_, insize = X.shape
-outsize = insize
+if __name__ == '__main__':
 
 
 
-encoder = train_network_from_generators(train_provider, val_provider, insize, outsize, \
-       '/tmp/tmp.model', architecture=[512, 512, 10, 512, 512], activation='tanh', max_epoch=5, \
-                patience=5, classification=False, bottleneck=2, truncate_at_bottleneck=True)
+    #################################################
+      
+    # ======== process command line ==========
 
-# encoder = truncate_model(autoencoder, 1)
+    a = ArgumentParser()
+    a.add_argument('-w', dest='wave_dir', required=True)
+    a.add_argument('-p', dest='pitchmark_dir', required=True)
+    a.add_argument('-o', dest='output_dir', required=True)    
+    a.add_argument('-d', dest='outdim', type=int, default=12)  
+    a.add_argument('-N', dest='nfiles', type=int, default=0)        
+    opts = a.parse_args()
+    
+    
+    output_dir = opts.output_dir
+    wav_datadir = opts.wave_dir
+    pm_datadir = opts.pitchmark_dir
+
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
+    if not os.path.isdir(output_dir + '/aef/'):
+        os.makedirs(output_dir + '/aef/')        
+
+    #  ./submit.sh ./autoencode_pitchmarks.py -w /afs/inf.ed.ac.uk/group/cstr/projects/blizzard_entries/blizzard2017/data/segmented/wav/ -p /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data/world_reaper/pm/ -o /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data/autoencoder_feats -d 50
 
 
-train_provider.reset()
-X, Y = train_provider.get_file_data_from_one_file()
-print train_provider.get_filename()
-encoded = encoder.predict(X)
-print encoded
+    train_provider = PitchPeriodProvider([wav_datadir, pm_datadir], ['wav', 'pm'], batch_size=1024, partition_size=100000, \
+                shuffle=True, limit_files=opts.nfiles)
+    val_provider = PitchPeriodProvider([wav_datadir, pm_datadir], ['wav', 'pm'],  batch_size=1024, partition_size=100000, \
+                shuffle=True, limit_files=opts.nfiles, validation=True)
+    (X, Y) = train_provider.get_file_data_from_one_file()
+    _, insize = X.shape
+    outsize = insize
 
-import pylab
-# pylab.subplot(211)
-# pylab.plot(X.transpose())
-# pylab.subplot(212)
-# pylab.plot(encoded.transpose())
 
-pylab.plot(encoded)
 
-pylab.show()
+    encoder = train_network_from_generators(train_provider, val_provider, insize, outsize, \
+           opts.output_dir + '/model.krs', architecture=[2048, 2048, opts.outdim, 2048, 2048], activation='relu', max_epoch=3, \
+                    patience=5, classification=False, bottleneck=2, truncate_at_bottleneck=True)
 
-numpy.save('/tmp/tmp.data', encoded)
+    # encoder = truncate_model(autoencoder, 1)
+
+
+    train_provider.reset()
+    while train_provider.file_index < len(train_provider.filelist):
+        X, Y = train_provider.get_file_data_from_one_file()
+        base = train_provider.get_filename()
+        if X.size == 0:
+            print 'skip %s'%(base)
+            continue
+        encoded = encoder.predict(X)
+        put_speech(encoded, opts.output_dir + '/aef/' + base + '.aef')
+        train_provider.file_index += 1
+    val_provider.reset()
+    while val_provider.file_index < len(val_provider.filelist):
+        X, Y = val_provider.get_file_data_from_one_file()
+        base = val_provider.get_filename()
+        if X.size == 0:
+            print 'skip %s'%(base)
+            continue        
+        encoded = encoder.predict(X)
+        put_speech(encoded, opts.output_dir + '/aef/' + base + '.aef')
+        val_provider.file_index += 1
+
+    #import pylab
+    # pylab.subplot(211)
+    # pylab.plot(X.transpose())
+    # pylab.subplot(212)
+    # pylab.plot(encoded.transpose())
+
+    #pylab.plot(encoded)
+
+    #pylab.show()
+
+    #numpy.save('/tmp/tmp.data', encoded)
+
+
+
+
+

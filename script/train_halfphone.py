@@ -30,6 +30,7 @@ from const import label_delimiter, vuv_stream_names, label_length_diff_tolerance
 
 
 import resample
+import resample_labels
 import varying_filter
 
 NORMWAVE=False # False
@@ -121,11 +122,12 @@ def main_work(config, overwrite_existing_data=False):
         
     ## Also filter for test material, in case they are in same directory:
     test_flist = []
-    for fname in test_flist:
+    for fname in flist:
         for pattern in config['test_patterns']:
             if pattern in fname:
                 test_flist.append(fname)
     flist = [name for name in flist if name not in test_flist]
+
 
     ## Finally, only take utterances which occur in train_list, if it is given in config:
     if 'train_list' in config:
@@ -230,6 +232,7 @@ def main_work(config, overwrite_existing_data=False):
     else:
         phones_dset = f.create_dataset("train_unit_names", (n_units,), maxshape=(n_units,), dtype='|S50') 
         filenames_dset = f.create_dataset("filenames", (n_units,), maxshape=(n_units,), dtype='|S50') 
+        unit_index_within_sentence_dset = f.create_dataset("unit_index_within_sentence_dset", (n_units,), maxshape=(n_units,), dtype='i') 
 
         if config['target_representation'] == 'epoch':
             cutpoints_dset = f.create_dataset("cutpoints", (n_units,3), maxshape=(n_units,3), dtype='i') 
@@ -241,6 +244,14 @@ def main_work(config, overwrite_existing_data=False):
             join_dim *= 2
 
         join_contexts_dset = f.create_dataset("join_contexts", (n_units + 1, join_dim), maxshape=(n_units + 1, join_dim), dtype='f') 
+
+
+    if config.get('store_full_magphase', False):
+        mp_mag_dset = f.create_dataset("mp_mag", (n_units, 513), maxshape=(n_units, 513), dtype='f') 
+        mp_imag_dset = f.create_dataset("mp_imag", (n_units, 513), maxshape=(n_units, 513), dtype='f') 
+        mp_real_dset = f.create_dataset("mp_real", (n_units, 513), maxshape=(n_units, 513), dtype='f')   
+        mp_fz_dset = f.create_dataset("mp_fz", (n_units, 1), maxshape=(n_units, 1), dtype='f')   
+
 
     ## Optionally dump some extra data which can be used for training a better join cost:-
     if config['dump_join_data']:
@@ -266,9 +277,13 @@ def main_work(config, overwrite_existing_data=False):
         pm_file = os.path.join(config['pm_datadir'], base + '.pm')
 
 
-        if not (os.path.isfile(wname) or os.path.isfile(pm_file)):
-            print 'Warning: no wave or pm -- skip!'
+        if not os.path.isfile(wname):
+            print 'Warning: no wave -- skip!'
             continue
+        if not(os.path.isfile(pm_file)):
+            print 'Warning: no pm -- skip!'
+            continue
+
 
         ## Get pitchmarks (to join halfphones on detected GCIs):-
         pms_seconds = read_pm(pm_file)
@@ -315,6 +330,7 @@ def main_work(config, overwrite_existing_data=False):
             ### Get speech params for join cost (i.e. probably natural speech).
             ### These are now expected to have already been resampled so that they are pitch-synchronous. 
             j_speech = compose_speech(join_stream_dirs, base, stream_list_join, datadims_join)
+            print 'j shape'
             print j_speech.shape
             if j_speech.size == 1:  ## bad return value  
                 continue 
@@ -332,6 +348,8 @@ def main_work(config, overwrite_existing_data=False):
 
         if  config['target_representation'] == 'epoch':
             t_frames, t_dim = t_speech.shape
+            print 't shape'
+            print t_speech.shape            
             if j_frames != len(pms_seconds):      
                 print (t_frames, len(pms_seconds))
                 print 'Warning: number of rows in target cost features not same as number of pitchmarks:'
@@ -402,7 +420,14 @@ def main_work(config, overwrite_existing_data=False):
             m,n = j_speech.shape
             context_data = segment_axis(j_speech, 2, overlap=1, axis=0).reshape((m-1, n*2))
 
-            unit_names = np.array(['_']*(t_speech.shape[0]-2))
+            ADD_PHONETIC_EPOCH = True
+            if ADD_PHONETIC_EPOCH:
+                labfile = os.path.join(config['label_datadir'], base + '.' + config['lab_extension'])
+                labs = read_label(labfile, config['quinphone_regex'])
+                unit_names = resample_labels.pitch_synchronous_resample_label(48000, 0.005, pms_samples, labs)
+                unit_names = unit_names[1:-1]
+            else:                
+                unit_names = np.array(['_']*(t_speech.shape[0]-2))
 
         else:
             ## Get representations of half phones to use in target cost:-
@@ -416,7 +441,7 @@ def main_work(config, overwrite_existing_data=False):
             context_data = get_contexts_for_pitch_synchronous_joincost(j_speech, cutpoint_indices)            
 
         m,n = unit_features.shape
-        if config['joincost_features']:
+        if config['joincost_features']:  ## i.e. don't store this in sample-based case
             filenames = [base] * len(cutpoints)
             o,p = context_data.shape
             # if config['target_representation'] == 'epoch':
@@ -424,14 +449,51 @@ def main_work(config, overwrite_existing_data=False):
             # else:
             assert o == m+1, (o, m)
 
+            unit_index_within_sentence = np.arange(m)
+
+
             if config['dump_join_data']:
                 start_join_feats, end_join_feats = get_join_data_AL(j_speech, cutpoint_indices, config['join_cost_halfwidth'])
+
+        CHECK_MAGPHASE_SIZES = False
+        if CHECK_MAGPHASE_SIZES: # config.get('store_full_magphase', False):
+            print 'CHECK_MAGPHASE_SIZES'
+            for extn in  ['mag','imag','real','f0']:
+                direc = extn + '_full'
+                if extn == 'f0':
+                    sdim = 1
+                else:
+                    sdim = 513
+                fname = os.path.join(config['full_magphase_dir'], direc, base+'.'+extn)
+                full_stream = get_speech(fname, sdim)
+                #full_stream = full_stream[1:-1,:]
+                print direc
+                print full_stream.shape
+                
+
+
+        if config.get('store_full_magphase', False):
+            mp_data = []
+            for extn in  ['mag','imag','real','f0']:
+                direc = extn + '_full'
+                if extn == 'f0':
+                    sdim = 1
+                else:
+                    sdim = 513
+                fname = os.path.join(config['full_magphase_dir'], direc, base+'.'+extn)
+                full_stream = get_speech(fname, sdim)
+                full_stream = full_stream[1:-1,:]
+                print direc
+                print full_stream.shape
+                mp_data.append(full_stream)
+
 
         ## Add everything to database:
         train_dset[start:start+m, :] = unit_features
         if config['joincost_features']:
             phones_dset[start:start+m] = unit_names
             filenames_dset[start:start+m] = filenames
+            unit_index_within_sentence_dset[start:start+m] = unit_index_within_sentence
             cutpoints_dset[start:start+m,:] = cutpoints
             join_contexts_dset[start:start+m, :] = context_data[:-1,:]
 
@@ -442,6 +504,14 @@ def main_work(config, overwrite_existing_data=False):
         if config['target_representation'] == 'sample':
             #wavecontext_dset[start:start+m, :] = wavecontext
             nextsample_dset[start:start+m, :] = nextsample
+
+        if config.get('store_full_magphase', False):
+            (mp_mag, mp_imag, mp_real, mp_fz) = mp_data
+
+            mp_mag_dset[start:start+m, :] = mp_mag
+            mp_imag_dset[start:start+m, :] = mp_imag
+            mp_real_dset[start:start+m, :] = mp_real
+            mp_fz_dset[start:start+m, :] = mp_fz
 
 
         start += m        
@@ -464,6 +534,7 @@ def main_work(config, overwrite_existing_data=False):
     if config['joincost_features']:
         phones_dset.resize(actual_nframes, axis=0)
         filenames_dset.resize(actual_nframes, axis=0)
+        unit_index_within_sentence_dset.resize(actual_nframes, axis=0)
         cutpoints_dset.resize(actual_nframes, axis=0)
 
         join_contexts_dset.resize(actual_nframes+1, axis=0)
@@ -476,6 +547,12 @@ def main_work(config, overwrite_existing_data=False):
         ## Store waveform standardisation info:
         wave_mu_sigma_dset = f.create_dataset("wave_mu_sigma", np.shape(wave_mu_sigma), dtype='f')
         wave_mu_sigma_dset[:] = wave_mu_sigma 
+
+    if config.get('store_full_magphase', False):
+        mp_mag_dset.resize(actual_nframes, axis=0)
+        mp_imag_dset.resize(actual_nframes, axis=0)
+        mp_real_dset.resize(actual_nframes, axis=0)
+        mp_fz_dset.resize(actual_nframes, axis=0)
 
 
     print 
@@ -669,11 +746,12 @@ def debug(msg):
     
 
 
-def compose_speech(feat_dir_dict, base, stream_list, datadims): 
+def compose_speech(feat_dir_dict, base, stream_list, datadims, ignore_streams=['triphone']): 
     '''
     where there is trouble, signal this by returning a 1 x 1 matrix
     '''
 
+    stream_list = [stream for stream in stream_list if stream not in ignore_streams]
     # mgc_fn = os.path.join(indir, 'mgc', base+'.mgc' ) 
     # f0_fn = os.path.join(indir, 'f0', base+'.f0' ) 
     # ap_fn = os.path.join(indir, 'ap', base+'.ap' ) 
@@ -858,6 +936,13 @@ def get_halfphone_stats(speech, labels, representation_type='twopoint'):
     of a unit, but rather the last frame in state 2 (for first halfphone) or in state 
     5 (for second halfphone). Other choices for middle frame are possible. 
     '''
+
+    if 0:
+        print speech
+        print labels
+        print speech.shape
+        print len(labels)
+        sys.exit('stop here 8293438472938')
 
     if representation_type not in ['onepoint', 'twopoint', 'threepoint']:
         sys.exit('Unknown halfphone representation type: %s '%(representation_type))

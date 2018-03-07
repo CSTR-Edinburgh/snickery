@@ -50,8 +50,8 @@ if __name__ == '__main__':
     thresh = 0.001 ## when we are this close to zero, stop 
     patience = 5
     max_epochs=1000
-    n_tune = 100
-    n_valid = 100
+    n_tune = 10 # 100
+    n_valid = 10 # 100
     losses = []
     weight_floor = 0.0 
 
@@ -71,6 +71,9 @@ if __name__ == '__main__':
     flist = synth.get_sentence_set('tune')
     if n_tune < len(flist):
         tune_flist = flist[:n_tune]
+    else:
+        tune_flist = flist
+    
     valid_flist = flist[n_tune:n_tune+n_valid]
     flist = tune_flist
 
@@ -81,6 +84,8 @@ if __name__ == '__main__':
         synth.set_join_weights(weights[:njoin])
         synth.set_target_weights(weights[njoin:])
 
+        if synth.config.get('greedy_search', False):
+            synth.get_tree_for_greedy_search()
 
         ### TODO: check why the following, which should give the same results, do not (also below on validation set):--
         #cache = synth.synth_utts_bulk(flist, synth_type='tune')
@@ -129,7 +134,7 @@ if __name__ == '__main__':
             best_weights = copy.copy(weights)
 
         if epochs_without_improvement == patience:
-            print '\n   ----> converged\n'
+            print '\n   ----> converged (or diverged and ran out of patience)\n'
             break
 
         if loss < thresh:

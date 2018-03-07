@@ -261,3 +261,83 @@ python ./script/synth_sample.py -c config/micro_test.cfg
 
 
 
+## Install magphase
+
+
+```
+cd ./snickery/
+mkdir tool
+cd tool/
+git clone https://github.com/CSTR-Edinburgh/magphase.git
+cd magphase/
+```
+
+Edit `config.ini` to point to existing REAPER and SPTK installations, e.g.:
+
+```
+[TOOLS]
+reaper=/afs/inf.ed.ac.uk/user/o/owatts/tool/REAPER-master/build/reaper
+sptk_mcep=/afs/inf.ed.ac.uk/user/o/owatts/repos/dnn_swahili/dnn_tts/tools/SPTK-3.7/bin/mcep
+```
+
+Modified magphase.py a little -- add to repo?
+
+
+Also reaper:
+
+def reaper(in_wav_file, out_est_file):
+    print("Extracting epochs with REAPER...")
+    global _reaper_bin
+#    cmd =  _reaper_bin + " -s -x 400 -m 50 -a -u 0.005 -i %s -p %s" % (in_wav_file, out_est_file)
+    cmd =  _reaper_bin + " -s -a -u 0.005 -i %s -p %s" % (in_wav_file, out_est_file)
+
+
+
+
+
+
+
+
+
+
+
+python make_wave_patch_features.py -w /afs/inf.ed.ac.uk/group/cstr/projects/blizzard_entries/blizzard2017/data/segmented/wav/ -p /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data/world_reaper/pm/ -o /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data/pitch_sync/ -d 31 -r 8000 -warp mu
+    
+
+
+
+(hybrid_synthesiser)[zamora]owatts: python script/extract_magphse_oliver.py -w /afs/inf.ed.ac.uk/group/cstr/projects/blizzard_entries/blizzard2017/data/segmented/wav/ -o /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data/magphase_lo_hi -ncores 30
+
+
+(hybrid_synthesiser)[zamora]owatts: python script/extract_magphse_oliver.py -w /afs/inf.ed.ac.uk/group/cstr/projects/blizzard_entries/blizzard2017/data/segmented/wav/ -o /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data/subset_magphase_lo_hi -N 100 -ncores 30
+
+
+
+
+
+
+
+
+
+
+sep stream contributions
+
+```
+import numpy as np
+
+a = np.random.uniform(0,100, size=(30,3))
+b = np.random.uniform(0,100, size=(30,3))
+c = np.random.uniform(0,100, size=(30,3))
+d = np.random.uniform(0,100, size=(30,3))
+
+ascore = ((a - b) * (a - b)).sum(axis=1)
+cscore = ((c - d) * (c - d)).sum(axis=1)
+
+ac = np.hstack([a,c])
+bd = np.hstack([b,d])
+acscore = ((ac - bd) * (ac - bd)).sum(axis=1)
+
+print acscore
+print ascore + cscore
+print ascore * cscore
+```

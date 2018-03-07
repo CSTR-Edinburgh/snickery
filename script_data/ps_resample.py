@@ -23,6 +23,9 @@ from const import vuv_stream_names
 import scipy # , pylab
 from scipy.interpolate import interp1d
 
+from resample import get_snack_frame_centres
+
+
 
 MGCDIM = 60
 #fshift_seconds = 0.005 # (0.001 * config['frameshift_ms'])
@@ -98,6 +101,8 @@ def main_work():
             
     if opts.feature_extension == 'mfcc':
         windowing_convention='HTK'
+    elif opts.feature_extension in ['formfreq', 'formband']:
+        windowing_convention='snack'
     else:
         windowing_convention='world'
 
@@ -218,6 +223,16 @@ def get_mfcc_frame_centres(wavlength, sample_rate, fshift_seconds, flength_secon
     return np.array( time_axis)
 
 
+def get_straight_frame_centres(wavlength, sample_rate, fshift_seconds):
+    ## !!!! This is hacked  from the world version -- not checked !!!!!!
+    samples_per_frame = int(sample_rate * fshift_seconds)
+    f0_length = (wavlength / float(sample_rate) / fshift_seconds) + 1
+    time_axis = []
+    for i in range(int(f0_length)):
+        time_axis.append(i * samples_per_frame)
+
+    time_axis = time_axis[:-1] ## omit last value for STRAIGHT...
+    return np.array(time_axis)
 
 
     
@@ -231,6 +246,8 @@ def pitch_synchronous_resample_one_coef_at_a_time(len_wave, sample_rate, fshift_
 
     if windowing_convention == 'world':
         frame_centres = get_world_frame_centres(len_wave, sample_rate, fshift_seconds)
+    elif windowing_convention == 'snack':
+        frame_centres = get_snack_frame_centres(len_wave, sample_rate, fshift_seconds)          
     elif windowing_convention == 'HTK':
         frame_centres = get_mfcc_frame_centres(len_wave, sample_rate, fshift_seconds, analysis_window_length_seconds)
     else:
@@ -262,6 +279,10 @@ def pitch_synchronous_resample(len_wave, sample_rate, fshift_seconds, pms, featu
 
     if windowing_convention == 'world':
         frame_centres = get_world_frame_centres(len_wave, sample_rate, fshift_seconds)
+    elif windowing_convention == 'straight':
+        frame_centres = get_straight_frame_centres(len_wave, sample_rate, fshift_seconds)        
+    elif windowing_convention == 'snack':
+        frame_centres = get_snack_frame_centres(len_wave, sample_rate, fshift_seconds)        
     elif windowing_convention == 'HTK':
         frame_centres = get_mfcc_frame_centres(len_wave, sample_rate, fshift_seconds, analysis_window_length_seconds)
     else:
@@ -269,8 +290,17 @@ def pitch_synchronous_resample(len_wave, sample_rate, fshift_seconds, pms, featu
 
     m,n = features.shape
 
-    assert len(frame_centres) == m, 'Length of features (%s) provided not consistent with length of wave and windowing_convention (which gives %s)'%(m, len(frame_centres))
-    
+    if windowing_convention == 'straight':
+        newlength = min(len(frame_centres), m)
+        features = features[:newlength, :]
+        frame_centres = frame_centres[:newlength]
+        m,n = features.shape
+
+
+    if not len(frame_centres) == m:
+        print  'Length of features (%s) provided not consistent with length of wave and windowing_convention (which gives %s)'%(m, len(frame_centres))
+        sys.exit() 
+
     interpolator = interp1d(frame_centres, features, kind=int_type, axis=0, \
                                 bounds_error=False, fill_value='extrapolate')
     resampled = interpolator(pms)

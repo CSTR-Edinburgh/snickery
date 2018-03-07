@@ -65,7 +65,7 @@ if __name__=="__main__":
 
     print 'test code script/varying_filter.py'
     #make_filter_01(1.6, 10, verbose=True)
-    make_filter_01(1.2, 30, verbose=True)
+    make_filter_01(1.2, 20, verbose=True)
 
 
 #111_1_1__1__1___1___1____1____1_____1_____    
