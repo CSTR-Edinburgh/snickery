@@ -49,7 +49,9 @@ from train_halfphone import debug
 
 from const import VERY_BIG_WEIGHT_VALUE
 
-# import pylab
+import pylab
+
+import speech_manip
 
 WRAPFST=True # True: used python bindings (pywrapfst) to OpenFST; False: use command line interface
 
@@ -90,7 +92,7 @@ def taper_matrix(a, taper_length):
     assert taper_length * 2 <= m, 'taper_length (%s) too long for (padded) unit length (%s)'%(taper_length, m) 
     in_taper = np.hanning(((taper_length + 1)*2)+1)[1:taper_length+1].reshape(-1,1)
     out_taper = np.flipud(in_taper).reshape(-1,1)
-    if False:
+    if 0:
         pylab.plot(in_taper)
         pylab.plot(out_taper)
         pylab.plot((in_taper + out_taper)-0.05)   ### check sum to 1
@@ -101,6 +103,7 @@ def taper_matrix(a, taper_length):
     return a
 
 def lin_interp_f0(fz):
+
     y = fz.flatten()
 
     voiced_ix = np.where( y > 0.0 )[0]  ## equiv to np.nonzero(y)    
@@ -111,7 +114,14 @@ def lin_interp_f0(fz):
     interpolator = scipy.interpolate.interp1d(voiced_ix, y[voiced_ix], kind='linear', axis=0, \
                                 bounds_error=False, fill_value='extrapolate')
     v_interpolated = interpolator(np.arange(y.shape[0]))
-    return (y.reshape((-1,1)), voicing_flag.reshape((-1,1)))
+
+    if 0:
+        import pylab
+        pylab.plot(y)
+        pylab.plot(v_interpolated)
+        pylab.show()
+        sys.exit('wvw9e8h98whvw')
+    return (v_interpolated.reshape((-1,1)), voicing_flag.reshape((-1,1)))
 
 
 def suppress_weird_festival_pauses(label, replace_list=['B_150'], replacement='pau'):
@@ -254,7 +264,7 @@ class Synthesiser(object):
             self.config['preselection_method'] = 'acoustic'
 
         ## set up some shorthand:-
-        self.tool = self.config['openfst_bindir']
+        self.tool = self.config.get('openfst_bindir', '')
 
         self.waveforms = {}
         if self.config['hold_waves_in_memory']:
@@ -1207,11 +1217,6 @@ def get_facts(vals):
                                             add_path_of_last_resort=True)        
         self.stop_clock(start_time)          
 
-        if self.config.get('debug_with_adjacent_frames', False):
-            print 'Concatenate naturally contiguous units to debug concatenation!'
-            best_path = np.arange(500)
-
-
         ### TODO:
         # if self.config.get('WFST_pictures', False):
 
@@ -1345,7 +1350,17 @@ def get_facts(vals):
 
         self.stop_clock(start_time)
 
-        if self.config.get('greedy_search', False):
+        if self.config.get('debug_with_adjacent_frames', False):
+            print 'Concatenate naturally contiguous units to debug concatenation!'
+            assert not self.config.get('magphase_use_target_f0', True), 'set magphase_use_target_f0 to False for using debug_with_adjacent_frames'
+            multiepoch = self.config.get('multiepoch', 1)
+            if multiepoch > 1:
+                best_path = np.arange(0,500, multiepoch)
+            else:
+                best_path = np.arange(500)
+
+
+        elif self.config.get('greedy_search', False):
             print '.'
             assert self.config.get('target_representation') == 'epoch'
             #### =-------------
@@ -2171,10 +2186,10 @@ def get_facts(vals):
             if self.train_filenames[index] in self.waveforms: # self.config['hold_waves_in_memory']:  ### i.e. waves or magphase FFT spectra
                 (mag_full, real_full, imag_full, f0_interp, vuv) = self.waveforms[self.train_filenames[index]]  
             else:     
-                mag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'mag_full', self.train_filenames[index] + '.mag'), HALFFFTLEN)
-                real_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'real_full',  self.train_filenames[index] + '.real'), HALFFFTLEN)
-                imag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'imag_full',  self.train_filenames[index] + '.imag'), HALFFFTLEN)
-                f0_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'f0_full',  self.train_filenames[index] + '.f0'), 1)            
+                mag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'mag', self.train_filenames[index] + '.mag'), HALFFFTLEN)
+                real_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'real',  self.train_filenames[index] + '.real'), HALFFFTLEN)
+                imag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'imag',  self.train_filenames[index] + '.imag'), HALFFFTLEN)
+                f0_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'f0',  self.train_filenames[index] + '.f0'), 1)            
                 f0_interp, vuv = lin_interp_f0(f0_full)
                 self.waveforms[self.train_filenames[index]] = (mag_full, real_full, imag_full, f0_interp, vuv)
 
@@ -2189,13 +2204,13 @@ def get_facts(vals):
             print self.unit_index_within_sentence[index]
 
         ## side effect -- data persists in self.waveforms. TODO: Protect against mem errors
-        if self.train_filenames[index] in self.waveforms: # self.config['hold_waves_in_memory']:  ### i.e. waves or magphase FFT spectra
+        if False: # self.train_filenames[index] in self.waveforms: # self.config['hold_waves_in_memory']:  ### i.e. waves or magphase FFT spectra
             (mag_full, real_full, imag_full, f0_interp, vuv) = self.waveforms[self.train_filenames[index]]  
         else:     
-            mag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'mag_full', self.train_filenames[index] + '.mag'), HALFFFTLEN)
-            real_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'real_full',  self.train_filenames[index] + '.real'), HALFFFTLEN)
-            imag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'imag_full',  self.train_filenames[index] + '.imag'), HALFFFTLEN)
-            f0_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'f0_full',  self.train_filenames[index] + '.f0'), 1)            
+            mag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'mag', self.train_filenames[index] + '.mag'), HALFFFTLEN)
+            real_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'real',  self.train_filenames[index] + '.real'), HALFFFTLEN)
+            imag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'imag',  self.train_filenames[index] + '.imag'), HALFFFTLEN)
+            f0_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'f0',  self.train_filenames[index] + '.f0'), 1)            
             f0_interp, vuv = lin_interp_f0(f0_full)
             self.waveforms[self.train_filenames[index]] = (mag_full, real_full, imag_full, f0_interp, vuv)
 
@@ -2230,6 +2245,10 @@ def get_facts(vals):
                 end_index = new_end_index
 
         if 0:
+            print 'se'
+            print (start_pad, end_pad)
+
+        if 0:
             print '-----indices:  '
             print start_index, end_index
             print end_index - start_index
@@ -2239,6 +2258,7 @@ def get_facts(vals):
         real_frag = real_full[start_index:end_index, :]
         imag_frag = imag_full[start_index:end_index, :]
         f0_frag = f0_interp[start_index:end_index, :]
+        # f0_frag = f0_full[start_index:end_index, :]  ## !!!!!!!!!!!!!!!!!!!!!!!!!!
         vuv_frag = vuv[start_index:end_index, :]
 
  
@@ -2278,7 +2298,11 @@ def get_facts(vals):
             mag_frag = taper_matrix(mag_frag, extra_frames*2)
             real_frag = taper_matrix(real_frag, extra_frames*2)
             imag_frag = taper_matrix(imag_frag, extra_frames*2)
+            #pylab.plot(f0_frag)            
             f0_frag = taper_matrix(f0_frag, extra_frames*2) 
+            #print 'welvinrbo90'
+            #pylab.plot(f0_frag)
+            #pylab.show()
             vuv_frag = taper_matrix(vuv_frag, extra_frames*2)            
 
 
@@ -2457,6 +2481,7 @@ def get_facts(vals):
         vuv = np.zeros((nframes, 1))
 
         write_start = 0
+        OFFSET = 0
         for ix in path:
             
             write_end = write_start + multiepoch + overlap
@@ -2466,9 +2491,21 @@ def get_facts(vals):
             imag[write_start:write_end, :] += imag_frag
             #fz[write_start+(overlap/2):write_end-(overlap/2), :] += fz_frag[(overlap/2):-(overlap/2),:]
             fz[write_start:write_end, :] += fz_frag
+
+            if 0:
+                import pylab
+                this_fz = np.zeros((nframes, 1))
+                this_fz[write_start:write_end, :] += fz_frag
+                pylab.plot(this_fz + OFFSET)
+                OFFSET += 100
+
             vuv[write_start:write_end, :] += vuv_frag
 
             write_start += multiepoch
+
+        if 0:
+            pylab.show()
+            sys.exit('sdcn89v9egvb')
 
         ## trim beginning fade in and end fade out:
         if overlap > 0:
@@ -2500,6 +2537,8 @@ def get_facts(vals):
 
         syn_wave = magphase.synthesis_from_lossless(mag, real, imag, fz, 48000)
         la.write_audio_file(fname, syn_wave, 48000)
+
+        #speech_manip.put_speech(fz, fname + '.f0')
   
         
 

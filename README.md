@@ -280,6 +280,16 @@ reaper=/afs/inf.ed.ac.uk/user/o/owatts/tool/REAPER-master/build/reaper
 sptk_mcep=/afs/inf.ed.ac.uk/user/o/owatts/repos/dnn_swahili/dnn_tts/tools/SPTK-3.7/bin/mcep
 ```
 
+or :
+
+```
+[TOOLS]
+reaper=/Users/owatts/tool/reaper/REAPER/build/reaper
+sptk_mcep=/Users/owatts/repos/simple4all/CSTRVoiceClone/trunk/bin/mcep
+
+```
+
+
 Modified magphase.py a little -- add to repo?
 
 
@@ -314,8 +324,28 @@ python make_wave_patch_features.py -w /afs/inf.ed.ac.uk/group/cstr/projects/bliz
 
 
 
+NICK
+
+WAV=/Users/owatts/repos/ossian_git_gold/Ossian/corpus/en/speakers/nick/wav
+
+MacBook-Air:snickery owatts$ python ./script/extract_magphase_features.py -w $WAV -o ~/working/hybrid/nicktest/data -N 20 -ncores 4
+
+## TODO: cp f0 to full
+
+        HALFFFTLEN = 513  ## TODO
 
 
+### disables:
+add taper (weighting for cross-fade):
+
+python ./script/train_halfphone.py -c ./config/nick_01.cfg  -X
+
+
+
+
+TODO:
+
+train_halfphone: ADD_PHONETIC_EPOCH
 
 
 

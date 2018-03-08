@@ -254,7 +254,7 @@ def main_work(config, overwrite_existing_data=False):
 
 
     ## Optionally dump some extra data which can be used for training a better join cost:-
-    if config['dump_join_data']:
+    if config.get('dump_join_data', False):
         join_database_fname = get_data_dump_name(config, joindata=True)
         fjoin = h5py.File(join_database_fname, "w")
         halfwin = config['join_cost_halfwidth']
@@ -420,7 +420,7 @@ def main_work(config, overwrite_existing_data=False):
             m,n = j_speech.shape
             context_data = segment_axis(j_speech, 2, overlap=1, axis=0).reshape((m-1, n*2))
 
-            ADD_PHONETIC_EPOCH = True
+            ADD_PHONETIC_EPOCH = False
             if ADD_PHONETIC_EPOCH:
                 labfile = os.path.join(config['label_datadir'], base + '.' + config['lab_extension'])
                 labs = read_label(labfile, config['quinphone_regex'])
@@ -452,7 +452,7 @@ def main_work(config, overwrite_existing_data=False):
             unit_index_within_sentence = np.arange(m)
 
 
-            if config['dump_join_data']:
+            if config.get('dump_join_data', False):
                 start_join_feats, end_join_feats = get_join_data_AL(j_speech, cutpoint_indices, config['join_cost_halfwidth'])
 
         CHECK_MAGPHASE_SIZES = False
@@ -497,7 +497,7 @@ def main_work(config, overwrite_existing_data=False):
             cutpoints_dset[start:start+m,:] = cutpoints
             join_contexts_dset[start:start+m, :] = context_data[:-1,:]
 
-            if config['dump_join_data']:
+            if config.get('dump_join_data', False):
                 start_join_feats_dset[start:start+m, :] = start_join_feats
                 end_join_feats_dset[start:start+m, :] = end_join_feats            
 
@@ -578,7 +578,7 @@ def main_work(config, overwrite_existing_data=False):
 
     print 'Stored training data for %s sentences to %s'%(n_train_utts, database_fname)
        
-    if config['dump_join_data']:       
+    if config.get('dump_join_data', False):    
         start_join_feats_dset.resize(actual_nframes, axis=0)
         end_join_feats_dset.resize(actual_nframes, axis=0)
         print 
