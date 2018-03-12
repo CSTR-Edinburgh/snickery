@@ -371,3 +371,98 @@ print acscore
 print ascore + cscore
 print ascore * cscore
 ```
+
+
+## Setup and experiments for IS2018
+
+### Setup tools
+
+```
+cd /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/
+
+git clone https://github.com/oliverwatts/snickery.git
+cd snickery
+
+mkdir tool
+cd tool/
+git clone https://github.com/CSTR-Edinburgh/magphase.git
+```
+
+Edit `config.ini` to point to existing REAPER and SPTK installations, e.g.:
+
+```
+[TOOLS]
+reaper=/afs/inf.ed.ac.uk/user/o/owatts/tool/REAPER-master/build/reaper
+sptk_mcep=/afs/inf.ed.ac.uk/user/o/owatts/repos/dnn_swahili/dnn_tts/tools/SPTK-3.7/bin/mcep
+```
+
+Patched `magphase.py` to avoid divide by 0 at runtime, pull request sent...
+
+Virtual Python environment made as above, with addition of:
+
+```
+ pip install matplotlib
+```
+
+### Feature extraction (in parallel)
+
+```
+[lubbock]owatts:
+
+cd /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery
+
+WAV=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/data/nick/wav
+
+python ./script/extract_magphase_features.py -w $WAV -o ~/sim2/oliver/hybrid_work/nick_data_01 -ncores 25
+```
+
+
+Made train list:
+
+```
+dhcp-90-053:snickery owatts$ find /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/nick_data_01/high/f0/ | while read fname ; do basename  $fname .f0  ; done > /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/nick_data_01/trainlist.txt
+
+sort  /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/nick_data_01/trainlist.txt > /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/nick_data_01/trainlist2.txt
+
+mv  /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/nick_data_01/trainlist2.txt  /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/nick_data_01/trainlist.txt
+```
+
+Edited, removed hvd, mrt and:
+
+```
+herald_980
+herald_981
+herald_982
+herald_983
+herald_984
+herald_985
+herald_986
+herald_987
+herald_988
+herald_989
+herald_990
+herald_991
+herald_992
+herald_993
+herald_994
+herald_995
+herald_996
+herald_997
+herald_998
+herald_999
+```
+
+These added as synthesis and tuning patterns in config.
+
+### Training and synthesis
+
+```
+python ./script/train_halfphone.py -c ./config/nick_01.cfg
+python ./script/synth_halfphone.py -c ./config/nick_01.cfg
+```
+
+### (Note to self) older work moved here
+mv slm_data_work/ /group/project/cstr2/oliver_AMT_2013-05-08/hybrid_work_backup_20180312/
+mv  /group/project/cstr2/oliver_AMT_2013-05-08/hybrid_work_backup_20180312/  /group/project/cstr2/owatts/
+
+
