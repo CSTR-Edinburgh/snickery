@@ -36,9 +36,11 @@ def make_magphase_directory_structure(outdir):
         for direc in [outdir_hi, outdir_lo]:
             new_direc = os.path.join(direc, subdir)
             safe_makedir(new_direc)
-    for subdir in ['shift', 'f0', 'lf0', 'pm']:
+    for subdir in ['shift', 'pm']:
         new_direc = os.path.join(outdir, subdir)
         safe_makedir(new_direc)
+    safe_makedir(os.path.join(outdir_hi, 'f0'))
+    safe_makedir(os.path.join(outdir_lo, 'lf0'))
 
 
 def magphase_analysis(wav_file, outdir='', fft_len=None, nbins_mel=60, nbins_phase=45):
@@ -74,14 +76,14 @@ def magphase_analysis(wav_file, outdir='', fft_len=None, nbins_mel=60, nbins_pha
     lu.write_binfile(m_mag, os.path.join(outdir_hi, 'mag', file_id + '.mag'))
     lu.write_binfile(m_real, os.path.join(outdir_hi, 'real', file_id + '.real'))
     lu.write_binfile(m_imag, os.path.join(outdir_hi, 'imag', file_id + '.imag'))
-    lu.write_binfile(v_f0, os.path.join(outdir, 'f0', file_id + '.f0'))
+    lu.write_binfile(v_f0, os.path.join(outdir_hi, 'f0', file_id + '.f0'))
     lu.write_binfile(v_shift, os.path.join(outdir, 'shift', file_id + '.shift'))
 
     ### write low-dim data:
     lu.write_binfile(m_mag_mel_log, os.path.join(outdir_lo, 'mag', file_id + '.mag'))
     lu.write_binfile(m_real_mel, os.path.join(outdir_lo, 'real', file_id + '.real'))
     lu.write_binfile(m_imag_mel, os.path.join(outdir_lo, 'imag', file_id + '.imag'))
-    lu.write_binfile(v_lf0_smth, os.path.join(outdir, 'lf0', file_id + '.lf0'))
+    lu.write_binfile(v_lf0_smth, os.path.join(outdir_lo, 'lf0', file_id + '.lf0'))
 
 
 
