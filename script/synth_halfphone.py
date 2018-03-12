@@ -35,6 +35,9 @@ import pywrapfst as openfst
 # from sklearn.neighbors import KDTree as sklearn_KDTree
 import StashableKDTree
 
+
+from sklearn.cluster import KMeans
+
 from util import safe_makedir, vector_to_string, basename
 from speech_manip import read_wave, write_wave, weight, get_speech
 from label_manip import break_quinphone, extract_monophone
@@ -136,7 +139,24 @@ def suppress_weird_festival_pauses(label, replace_list=['B_150'], replacement='p
         outlabel.append(((s,e),new_quinphone))
     return outlabel
 
-    
+
+def random_subset_data(data, seed=1234, train_frames=0):
+    '''
+    shuffle and select subset of data; train_frames==0 : all
+    '''
+    shuff_data = copy.copy(data)
+    np.random.seed(seed)
+    np.random.shuffle(shuff_data)   
+    m,n = np.shape(shuff_data)
+    if train_frames == 0:
+        train_frames = m
+    if m < train_frames:
+        train_frames = m
+    shuff_data = shuff_data[:train_frames, :]
+    print 'selected %s of %s frames for learning codebook(s)'%(train_frames, m)
+    #put_speech(train_data, top_vq_dir + '/traindata_subset.cmp')
+    return shuff_data    
+        
 
 class Synthesiser(object):
 
@@ -288,8 +308,11 @@ class Synthesiser(object):
 
             assert self.config['target_representation'] == 'epoch'
             
-            
-            self.get_tree_for_greedy_search()
+            if self.config.get('multiple_search_trees', 1) > 1:
+                sys.exit('multiple_search_trees not implemented yet -- try adjusting search_epsilon instead to speed up search')
+                self.get_multiple_trees_for_greedy_search()
+            else:
+                self.get_tree_for_greedy_search()
 
 
         elif self.config['preselection_method'] == 'acoustic':
@@ -434,6 +457,75 @@ class Synthesiser(object):
             #pickle.dump(self.joint_tree,open(treefile,'wb'))
             self.stop_clock(t)
             
+
+
+    def cluster(self, ncluster, limit=0):
+        if limit == 0:
+            data = self.train_unit_features
+        else:
+            data = random_subset_data(self.train_unit_features, train_frames=limit)
+        t = self.start_clock('cluster')
+        kmeans = KMeans(n_clusters=ncluster, init='k-means++', n_init=1, max_iter=300, tol=0.0001, precompute_distances=True, verbose=0, random_state=1234, copy_x=True, n_jobs=1, algorithm='auto')
+        kmeans.fit(data)
+        self.stop_clock(t)
+
+        self.cbook = kmeans.cluster_centers_
+
+        self.cbook_tree = scipy.spatial.cKDTree(self.cbook, leafsize=1, compact_nodes=True, balanced_tree=True)
+        dists, cix = self.cbook_tree.query(self.train_unit_features)
+        self.cluster_ixx = cix.flatten()
+
+
+
+    def get_multiple_trees_for_greedy_search(self):
+        '''
+        Partition data in hard way with k-means, build 1 KD-tree per partition
+        '''
+
+        m,n = self.unit_start_data.shape
+
+        self.prev_join_rep = self.unit_start_data[:,:n/2]       
+        self.current_join_rep = self.unit_start_data[:,n/2:]
+
+        start_time = self.start_clock('build multiple joint KD trees')
+        ## Needs to be stored synthesis options specified (due to weights applied before tree construction):
+        treefile = get_data_dump_name(self.config) + '_' + self.make_synthesis_condition_name() + '_joint_tree.pkl' 
+
+        multiepoch = self.config.get('multiepoch', 1)
+        overlap = 0
+        if multiepoch > 1:
+            overlap = multiepoch-1
+            ### reshape target rep:
+            m,n = self.train_unit_features.shape
+            self.train_unit_features = segment_axis(self.train_unit_features, multiepoch, overlap=overlap, axis=0)
+            self.train_unit_features = self.train_unit_features.reshape(m-overlap,n*multiepoch)
+
+            if self.config.get('last_frame_as_target', False):
+                print 'test -- take last frame only as target...'  ## TODO99
+                # self.train_unit_features = self.train_unit_features[:,-n:]
+                self.train_unit_features = np.hstack([self.train_unit_features[:,:n], self.train_unit_features[:,-n:]])
+
+            ### alter join reps: -- first tried taking first vs. last
+            m,n = self.current_join_rep.shape
+            self.current_join_rep = self.current_join_rep[overlap:,:]
+            self.prev_join_rep = self.prev_join_rep[:-overlap, :]
+
+        #### ---- cluster self.train_unit_features
+        self.cluster(self.config.get('multiple_search_trees', 1), limit=self.config.get('cluster_data_on_npoints', 10000))
+        ### ^--- populates self.cluster_ixx
+
+        combined_rep = np.hstack([self.prev_join_rep, self.train_unit_features])
+
+        self.joint_trees = []
+        self.node_maps = []
+
+        for cluster_number in range(self.config.get('multiple_search_trees', 1)):
+            t = self.start_clock('make joint join + target tree for cluster %s...'%(cluster_number))
+            self.joint_trees.append(scipy.spatial.cKDTree(combined_rep[self.cluster_ixx==cluster_number, :], leafsize=100, balanced_tree=False, compact_nodes=False))
+            self.node_maps.append(np.arange(self.number_of_units-overlap)[self.cluster_ixx==cluster_number])
+            self.stop_clock(t)
+        
+
 
 
     def set_join_weights(self, weights):
@@ -1685,31 +1777,24 @@ def get_facts(vals):
                 # unit_features = unit_features[:,-n:]
                 unit_features = np.hstack([unit_features[:,:n], unit_features[:,-n:]])
 
-
-        #current_join_rep = self.join_contexts_unweighted[:-1,n/2:] ## all but last frame 
-        #current_join_rep *= 0.3
         ix = -1 
         final_dists = []   ### for debugging
         for target_vector in unit_features:
             both = np.concatenate([prev_join_vector, target_vector]).reshape((1,-1))
-            dists, indexes = self.joint_tree.query(both, k=7 + len(holdout)) # , n_jobs=4)
+            # dists, indexes = self.joint_tree.query(both, k=7 + len(holdout)) # , n_jobs=4)
+            dists, indexes = self.joint_tree.query(both, k=1+len(holdout), eps=self.config.get('search_epsilon', 0.0)) # , n_jobs=4)
+            
             dindexes = zip(dists.flatten(), indexes.flatten())
-            #cands = indexes.flatten()
-            #print '---ggggg----'
-            #print dist
-            #print 
-            if ix > -1:
-                ## TODO: forbid regression -- configurable
-                dindexes = [(d,i) for (d,i) in dindexes if i not in range(ix-5, ix+1)]
-                dindexes = [(d,i) for (d,i) in dindexes if i not in holdout]
+            # if ix > -1:
+            #     ## TODO: forbid regression -- configurable
+            #     dindexes = [(d,i) for (d,i) in dindexes if i not in range(ix-5, ix+1)]
+            #     dindexes = [(d,i) for (d,i) in dindexes if i not in holdout]
+            
             (d, ix) = dindexes[0]
             path.append(ix)
             final_dists.append(d)
             prev_join_vector = self.current_join_rep[ix,:]
         self.stop_clock(start_time)
-        #print 'Greedy path found:'
-        #print final_dists
-        # print path
         return path
 
 
@@ -2198,7 +2283,7 @@ def get_facts(vals):
     def retrieve_magphase_frag(self, index, extra_frames=0):
         HALFFFTLEN = 513  ## TODO
 
-        if 1:
+        if 0:
             print 'retrieving fragment'
             print self.train_filenames[index]
             print self.unit_index_within_sentence[index]
