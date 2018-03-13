@@ -124,6 +124,7 @@ if __name__ == '__main__':
     a.add_argument('-N', dest='nfiles', type=int, default=0)  
     a.add_argument('-m', type=int, default=60, help='low dim feature size (compressed mel magnitude spectrum & cepstrum)')  
     a.add_argument('-p', type=int, default=45, help='low dim feature size (compressed mel phase spectra & cepstra)')          
+    a.add_argument('-fftlen', type=int, default=1024)          
     a.add_argument('-ncores', type=int, default=0)   
 
     a.add_argument('-pm_dir', type=str, default='', help='Specify a directory of existing pitchmark files to use, instead of starting from scratch')
@@ -148,7 +149,7 @@ if __name__ == '__main__':
         ## Use partial to pass fixed arguments to the func (https://stackoverflow.com/questions/5442910/python-multiprocessing-pool-map-for-multiple-arguments):
 
         pool = multiprocessing.Pool(processes=opts.ncores) 
-        results = pool.map(functools.partial(magphase_analysis, outdir=opts.output_dir, fft_len=1024, nbins_mel=opts.m, nbins_phase=opts.p, pm_dir=opts.pm_dir, cepstra=opts.cepstra), wavlist)         
+        results = pool.map(functools.partial(magphase_analysis, outdir=opts.output_dir, fft_len=opts.fftlen, nbins_mel=opts.m, nbins_phase=opts.p, pm_dir=opts.pm_dir, cepstra=opts.cepstra), wavlist)         
         pool.close() #we are not adding any more processes
         #pool.join() #tell it to wait until all threads are done before going on
 
@@ -156,6 +157,6 @@ if __name__ == '__main__':
     else:
 
         for wav_file in wavlist:
-            magphase_analysis(wav_file, outdir=opts.output_dir, fft_len=1024, nbins_mel=opts.m, nbins_phase=opts.p, pm_dir=opts.pm_dir, cepstra=opts.cepstra) 
+            magphase_analysis(wav_file, outdir=opts.output_dir, fft_len=opts.fftlen, nbins_mel=opts.m, nbins_phase=opts.p, pm_dir=opts.pm_dir, cepstra=opts.cepstra) 
 
 
