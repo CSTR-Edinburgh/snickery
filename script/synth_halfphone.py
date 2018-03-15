@@ -56,6 +56,8 @@ import pylab
 
 import speech_manip
 
+
+
 WRAPFST=True # True: used python bindings (pywrapfst) to OpenFST; False: use command line interface
 
 assert WRAPFST
@@ -104,27 +106,6 @@ def taper_matrix(a, taper_length):
     a[:taper_length,:] *= in_taper
     a[-taper_length:,:] *= out_taper
     return a
-
-def lin_interp_f0(fz):
-
-    y = fz.flatten()
-
-    voiced_ix = np.where( y > 0.0 )[0]  ## equiv to np.nonzero(y)    
-    voicing_flag = np.zeros(y.shape)
-    voicing_flag[voiced_ix] = 1.0
-    
-    ## linear interp voiced:
-    interpolator = scipy.interpolate.interp1d(voiced_ix, y[voiced_ix], kind='linear', axis=0, \
-                                bounds_error=False, fill_value='extrapolate')
-    v_interpolated = interpolator(np.arange(y.shape[0]))
-
-    if 0:
-        import pylab
-        pylab.plot(y)
-        pylab.plot(v_interpolated)
-        pylab.show()
-        sys.exit('wvw9e8h98whvw')
-    return (v_interpolated.reshape((-1,1)), voicing_flag.reshape((-1,1)))
 
 
 def suppress_weird_festival_pauses(label, replace_list=['B_150'], replacement='pau'):
@@ -287,7 +268,14 @@ class Synthesiser(object):
         self.tool = self.config.get('openfst_bindir', '')
 
         self.waveforms = {}
-        if self.config['hold_waves_in_memory']:
+
+        self.use_hdf_magphase = self.config.get('use_hdf_magphase', '')
+        if self.use_hdf_magphase:
+            self.hdf_magphase_pointer = h5py.File(self.use_hdf_magphase, 'r')
+
+
+        elif self.config['hold_waves_in_memory']:
+
             print 'load waves into memory'
             
             for base in np.unique(self.train_filenames):
@@ -296,6 +284,14 @@ class Synthesiser(object):
                 wavefile = os.path.join(self.config['wav_datadir'], base + '.wav')
                 wave, sample_rate = read_wave(wavefile)
                 self.waveforms[base] = wave
+
+        elif self.config['preload_all_magphase_utts']:
+
+            print 'load magphase into memory'
+            
+            self.preload_all_magphase_utts()
+
+
         print
 
         assert self.config['preselection_method'] in ['acoustic', 'quinphone', 'monophone_then_acoustic']
@@ -387,6 +383,54 @@ class Synthesiser(object):
         
 
 
+    def reconfigure_settings(self, changed_config_values):
+        '''
+        Currently used by weight tuning script -- adjust configs and rebuild trees etc as 
+        necessary
+        '''
+        print 'reconfiguring synthesiser...'
+        assert self.config['target_representation'] == 'epoch'
+        assert self.config['greedy_search']
+
+        for key in ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', 'search_epsilon', 'multiepoch']:
+            assert key in changed_config_values, key
+
+        rebuild_tree = False
+        
+        if self.config['join_cost_weight'] != changed_config_values['join_cost_weight']:
+            self.config['join_cost_weight'] = changed_config_values['join_cost_weight']
+            rebuild_tree = True
+
+        if self.config['join_stream_weights'] != changed_config_values['join_stream_weights']:
+            self.config['join_stream_weights'] = changed_config_values['join_stream_weights']
+            rebuild_tree = True
+
+        if self.config['target_stream_weights'] != changed_config_values['target_stream_weights']:
+            self.config['target_stream_weights'] = changed_config_values['target_stream_weights']
+            rebuild_tree = True
+
+        if self.config['multiepoch'] != changed_config_values['multiepoch']:
+            self.config['multiepoch'] = changed_config_values['multiepoch']
+            rebuild_tree = True
+
+        if self.config.get('search_epsilon', 1.0) != changed_config_values['search_epsilon']:
+            self.config['search_epsilon'] = changed_config_values['search_epsilon']
+
+        if self.config.get('magphase_use_target_f0', True) != changed_config_values['magphase_use_target_f0']:
+            self.config['magphase_use_target_f0'] = changed_config_values['magphase_use_target_f0']
+
+        if self.config.get('magphase_overlap', 0) != changed_config_values['magphase_overlap']:
+            self.config['magphase_overlap'] = changed_config_values['magphase_overlap']
+
+
+        if rebuild_tree:
+            print 'set join weights after reconfiguring'
+            self.set_join_weights(np.array(self.config['join_stream_weights']) * changed_config_values['join_cost_weight'])
+            print 'set target weights after reconfiguring'
+            self.set_target_weights(np.array(self.config['target_stream_weights']) * (1.0 - changed_config_values['join_cost_weight']))   
+            print 'tree...'           
+            self.get_tree_for_greedy_search()
+            print 'done'
     def get_tree_for_greedy_search(self):
 
         m,n = self.unit_start_data.shape
@@ -405,7 +449,7 @@ class Synthesiser(object):
 
 
 
-        start_time = self.start_clock('build/reload joint KD tree')
+        #start_time = self.start_clock('build/reload joint KD tree')
         ## Needs to be stored synthesis options specified (due to weights applied before tree construction):
         treefile = get_data_dump_name(self.config) + '_' + self.make_synthesis_condition_name() + '_joint_tree.pkl' 
         if False: # os.path.exists(treefile):  ## never reload!
@@ -417,6 +461,7 @@ class Synthesiser(object):
 
             multiepoch = self.config.get('multiepoch', 1)
             if multiepoch > 1:
+                t = self.start_clock('reshape data for multiepoch...')
                 overlap = multiepoch-1
                 ### reshape target rep:
                 m,n = self.train_unit_features.shape
@@ -437,12 +482,13 @@ class Synthesiser(object):
                 # m,n = self.current_join_rep.shape
                 # self.current_join_rep = segment_axis(self.current_join_rep, multiepoch, overlap=overlap, axis=0).reshape(m-overlap,n*multiepoch)
                 # self.prev_join_rep = segment_axis(self.prev_join_rep, multiepoch, overlap=overlap, axis=0).reshape(m-overlap,n*multiepoch)
+                self.stop_clock(t)
 
-
-            print self.prev_join_rep.shape
-            print self.train_unit_features.shape
+            #print self.prev_join_rep.shape
+            #print self.train_unit_features.shape
+            t = self.start_clock('stack data to train joint tree...')
             combined_rep = np.hstack([self.prev_join_rep, self.train_unit_features])
-            print combined_rep.shape
+            self.stop_clock(t)
             
 
             #self.report('make joint join + target tree...')
@@ -1535,8 +1581,8 @@ def get_facts(vals):
             self.report('')
             self.report('')
 
-        print 'path info:'
-        print self.train_unit_names[best_path].tolist()
+        #print 'path info:'
+        #print self.train_unit_names[best_path].tolist()
 
 
         target_features = unit_features ## older nomenclature?
@@ -2266,6 +2312,9 @@ def get_facts(vals):
  
 
     def preload_magphase_utts(self, path):
+        '''
+        preload utts used for a given path
+        '''
         HALFFFTLEN = 513  ## TODO
         for index in path:
             if self.train_filenames[index] in self.waveforms: # self.config['hold_waves_in_memory']:  ### i.e. waves or magphase FFT spectra
@@ -2275,8 +2324,23 @@ def get_facts(vals):
                 real_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'real',  self.train_filenames[index] + '.real'), HALFFFTLEN)
                 imag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'imag',  self.train_filenames[index] + '.imag'), HALFFFTLEN)
                 f0_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'f0',  self.train_filenames[index] + '.f0'), 1)            
-                f0_interp, vuv = lin_interp_f0(f0_full)
+                f0_interp, vuv = speech_manip.lin_interp_f0(f0_full)
                 self.waveforms[self.train_filenames[index]] = (mag_full, real_full, imag_full, f0_interp, vuv)
+
+
+    def preload_all_magphase_utts(self):
+        HALFFFTLEN = 513  ## TODO
+        start_time = self.start_clock('Preload magphase utts for corpus')
+        for base in np.unique(self.train_filenames):
+            print base
+            mag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'mag', base + '.mag'), HALFFFTLEN)
+            real_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'real',  base + '.real'), HALFFFTLEN)
+            imag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'imag',  base + '.imag'), HALFFFTLEN)
+            f0_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'f0', base + '.f0'), 1)            
+            f0_interp, vuv = speech_manip.lin_interp_f0(f0_full)
+            self.waveforms[base] = (mag_full, real_full, imag_full, f0_interp, vuv)
+        self.stop_clock(start_time) 
+
 
 
 
@@ -2288,16 +2352,25 @@ def get_facts(vals):
             print self.train_filenames[index]
             print self.unit_index_within_sentence[index]
 
-        ## side effect -- data persists in self.waveforms. TODO: Protect against mem errors
-        if False: # self.train_filenames[index] in self.waveforms: # self.config['hold_waves_in_memory']:  ### i.e. waves or magphase FFT spectra
-            (mag_full, real_full, imag_full, f0_interp, vuv) = self.waveforms[self.train_filenames[index]]  
-        else:     
-            mag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'mag', self.train_filenames[index] + '.mag'), HALFFFTLEN)
-            real_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'real',  self.train_filenames[index] + '.real'), HALFFFTLEN)
-            imag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'imag',  self.train_filenames[index] + '.imag'), HALFFFTLEN)
-            f0_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'f0',  self.train_filenames[index] + '.f0'), 1)            
-            f0_interp, vuv = lin_interp_f0(f0_full)
-            self.waveforms[self.train_filenames[index]] = (mag_full, real_full, imag_full, f0_interp, vuv)
+        if self.use_hdf_magphase:
+            base = self.train_filenames[index]
+            mag_full = self.hdf_magphase_pointer[base]['mag'][:]
+            real_full = self.hdf_magphase_pointer[base]['real'][:]
+            imag_full = self.hdf_magphase_pointer[base]['imag'][:]
+            f0_interp = self.hdf_magphase_pointer[base]['f0_interp'][:]
+            vuv = self.hdf_magphase_pointer[base]['vuv'][:]
+
+        else:
+            ## side effect -- data persists in self.waveforms. TODO: Protect against mem errors
+            if False: # self.train_filenames[index] in self.waveforms: # self.config['hold_waves_in_memory']:  ### i.e. waves or magphase FFT spectra
+                (mag_full, real_full, imag_full, f0_interp, vuv) = self.waveforms[self.train_filenames[index]]  
+            else:     
+                mag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'mag', self.train_filenames[index] + '.mag'), HALFFFTLEN)
+                real_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'real',  self.train_filenames[index] + '.real'), HALFFFTLEN)
+                imag_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'imag',  self.train_filenames[index] + '.imag'), HALFFFTLEN)
+                f0_full = get_speech(os.path.join(self.config['full_magphase_dir'], 'f0',  self.train_filenames[index] + '.f0'), 1)            
+                f0_interp, vuv = speech_manip.lin_interp_f0(f0_full)
+                self.waveforms[self.train_filenames[index]] = (mag_full, real_full, imag_full, f0_interp, vuv)
 
         start_index = self.unit_index_within_sentence[index]
         #start_index -= 1  ### because magphase have extra pms beginning and end
@@ -2620,8 +2693,9 @@ def get_facts(vals):
             pylab.show()
             sys.exit('evevwev9999')
 
-        syn_wave = magphase.synthesis_from_lossless(mag, real, imag, fz, 48000)
-        la.write_audio_file(fname, syn_wave, 48000)
+        sample_rate = self.config.get('sample_rate', 48000)
+        syn_wave = magphase.synthesis_from_lossless(mag, real, imag, fz, sample_rate)
+        la.write_audio_file(fname, syn_wave, sample_rate)
 
         #speech_manip.put_speech(fz, fname + '.f0')
   
@@ -3213,8 +3287,8 @@ def get_facts(vals):
 
         self.stop_clock(t)     
 
-        print 'path info:'
-        print self.train_unit_names[best_path].tolist()
+        # print 'path info:'
+        # print self.train_unit_names[best_path].tolist()
 
 
 

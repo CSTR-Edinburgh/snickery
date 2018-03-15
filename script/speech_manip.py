@@ -7,7 +7,7 @@ from numpy import array, reshape, shape
 import numpy as np
 import numpy
 import math
-
+import scipy.interpolate
 import wave
 
 
@@ -219,3 +219,24 @@ def deweight(speech, weight_vec):
     return speech
             
         
+def lin_interp_f0(fz):
+
+    y = fz.flatten()
+
+    voiced_ix = np.where( y > 0.0 )[0]  ## equiv to np.nonzero(y)    
+    voicing_flag = np.zeros(y.shape)
+    voicing_flag[voiced_ix] = 1.0
+    
+    ## linear interp voiced:
+    interpolator = scipy.interpolate.interp1d(voiced_ix, y[voiced_ix], kind='linear', axis=0, \
+                                bounds_error=False, fill_value='extrapolate')
+    v_interpolated = interpolator(np.arange(y.shape[0]))
+
+    if 0:
+        import pylab
+        pylab.plot(y)
+        pylab.plot(v_interpolated)
+        pylab.show()
+        sys.exit('wvw9e8h98whvw')
+    return (v_interpolated.reshape((-1,1)), voicing_flag.reshape((-1,1)))
+
