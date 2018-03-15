@@ -465,4 +465,8 @@ python ./script/synth_halfphone.py -c ./config/nick_01.cfg
 mv slm_data_work/ /group/project/cstr2/oliver_AMT_2013-05-08/hybrid_work_backup_20180312/
 mv  /group/project/cstr2/oliver_AMT_2013-05-08/hybrid_work_backup_20180312/  /group/project/cstr2/owatts/
 
+### Temporal smoothing and variance scaling
 
+```
+python ./script_data/smooth_data.py -f unsmoothed_feat_dir -o smoothed_feat_dir -m 60 -t mag -w 5 -s 0.8
+```
