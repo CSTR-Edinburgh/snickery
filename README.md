@@ -470,3 +470,60 @@ mv  /group/project/cstr2/oliver_AMT_2013-05-08/hybrid_work_backup_20180312/  /gr
 ```
 python ./script_data/smooth_data.py -f unsmoothed_feat_dir -o smoothed_feat_dir -m 60 -t mag -w 5 -s 0.8
 ```
+
+
+
+
+### extract cepstra:
+```
+cd /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery
+
+WAV=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/data/nick/wav
+
+python ./script/extract_magphase_features.py -w $WAV -o ~/sim2/oliver/hybrid_work/nick_data_03_cepstra -ncores 25 -m 60 -p 45 -N 20 -cepstra
+```
+
+
+### HDF format
+```
+python ./script/hdf_magphase_data.py -d ~/sim2/oliver/hybrid_work/nick_data_01/high/ -o ~/proj/hybrid/local_data_dumps/nick_01.h5 -f 1024
+```
+
+
+
+### Test at 16kHz (for compatibility with wp2)
+
+cd /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery
+
+WAV=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/wavepred_work/data/wav
+
+python ./script/extract_magphase_features.py -w $WAV -o ~/sim2/oliver/hybrid_work/nick_data_02_16k -ncores 25 -m 60 -p 45
+
+### with 1000 sentences:
+/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/nick_work_02_16k/synthesis_test/1000_utts_jstreams-mag-real-imag_tstreams-mag-lf0_rep-epoch/greedy-yes_target-1.0-1.0_join-0.2-0.2-0.2_scale-1.0_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-4/hvd_001_1.wav
+
+
+#### 16k residual:
+
+NB use low dim feats from original wave files, only resid waves and hi-dim...
+
+cd /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery
+
+WAV=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/wp2/synched_from_hynek/B002DET/train/residuals_epoch_20
+
+python ./script/extract_magphase_features.py -w $WAV -o ~/sim2/oliver/hybrid_work/nick_data_02_16k_resid -ncores 25 -m 26 -p 10 -pm_dir ~/sim2/oliver/hybrid_work/nick_data_02_16k/pm
+
+
+#### 100 utts
+
+
+  653  python script/train_halfphone.py -c  config/nick_03_16k_resid.cfg
+  654  python script/synth_halfphone.py -c  config/nick_03_16k_resid.cfg
+
+ ~/scripts/sum_waves.py /tmp/out.wav /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/wp2/synched_from_hynek/B002DET/synthesis/epoch_20/hvd_001_1.wav  /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/nick_work_02_16k_resid/synthesis_test/100_utts_jstreams-mag-real-imag_tstreams-mag-lf0_rep-epoch/greedy-yes_target-1.0-1.0_join-0.2-0.2-0.2_scale-1.0_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-4/hvd_001_1.wav 0.9 0.1
+
+
+
+#### 1000 utts:
+
+ ~/scripts/sum_waves.py /tmp/out1000.wav /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/wp2/synched_from_hynek/B002DET/synthesis/epoch_20/hvd_001_1.wav  /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/nick_work_02_16k_resid/synthesis_test/1000_utts_jstreams-mag-real-imag_tstreams-mag-lf0_rep-epoch/greedy-yes_target-1.0-1.0_join-0.2-0.2-0.2_scale-1.0_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-4/hvd_001_1.wav 0.8 0.2
