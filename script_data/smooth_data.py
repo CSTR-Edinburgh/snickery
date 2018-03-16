@@ -16,8 +16,10 @@ def main():
 	a.add_argument('-f', dest='input_dir',  required=True)
 	a.add_argument('-o', dest='output_dir', required=True)    
 	a.add_argument('-t', dest='data_ext',   required=True)
-	a.add_argument('-m', dest='dimension',  type=int, default=60, help='dimension')  
-	a.add_argument('-w', dest='win_size',   type=int, default=5, help='win_size - needs to be an ODD number')  
+	a.add_argument('-l', dest='file_list',  required=False)
+	a.add_argument('-m', dest='dimension',  type=int,   default=60,  help='dimension')  
+	a.add_argument('-w', dest='twin_size',  type=int,   default=5,   help='temporal win_size in frames - needs to be an ODD number')  
+	a.add_argument('-c', dest='cwin_size',  type=int,   default=1,   help='coefficient win_size in frames - needs to be an ODD number')  
 	a.add_argument('-s', dest='std_scale',  type=float, default=0.8, help='std_scale')  
 
 	opts = a.parse_args()
@@ -26,30 +28,101 @@ def main():
 	output_dir = opts.output_dir
 	data_ext   = opts.data_ext
 	dimension  = opts.dimension
-	win_size   = opts.win_size # needs to be an ODD number - window is centered in centre frame
+	twin_size  = opts.twin_size # needs to be an ODD number - window is centered in centre frame
+	cwin_size  = opts.cwin_size # needs to be an ODD number - window is centered in centre frame
 	std_scale  = opts.std_scale
+	file_list  = opts.file_list	
 
 	if os.path.exists(output_dir) is False:
-		os.mkdir(output_dir)
+		os.makedirs(output_dir)
 
-	if win_size % 2 == 0:
+	if twin_size % 2 == 0:
 		print "-w option needs an ODD number"
 		exit()
 
-	files = sorted(glob.glob(input_dir + '/*.' + data_ext))
+	if cwin_size % 2 == 0:
+		print "-c option needs an ODD number"
+		exit()
+
+	if file_list is not None:
+		f = open(file_list)
+		files = [newline.strip() for newline in f.readlines()]
+		f.close()
+	else:
+		files = sorted(glob.glob(input_dir + '/*.' + data_ext))
 	
 	print "Processing " + str(len(files)) + " files."
 	for file in files:
 
-		file_name     = os.path.basename(file)
+		if file_list is not None:
+			file = input_dir + file + '.' + data_ext
+
+		file_name = os.path.basename(file)
+		
 		out_file_name = output_dir + '/' + file_name
 		data, num_frames = load_binary_file_frame(file, dimension)
 
 		smoothed_data = data
-		smoothed_data = temporal_smoothing(smoothed_data, win_size)
-		smoothed_data = variance_scaling(smoothed_data, std_scale)
-		
+
+		if 'f0' in data_ext: # interpolate F0
+			smoothed_data , vuv = interpolate_f0(smoothed_data)
+
+		if twin_size != 1:
+			smoothed_data = temporal_smoothing(smoothed_data, twin_size)
+		if cwin_size != 1:
+			smoothed_data = coefficient_smoothing(smoothed_data, cwin_size)
+		if std_scale != 1.0:
+			smoothed_data = variance_scaling(smoothed_data, std_scale)
+
+		if 'f0' in data_ext: # inforce original V/UV
+			smoothed_data[vuv==0.0] = 0.0
+
 		array_to_binary_file(smoothed_data, out_file_name)
+
+### from speech_manip.py
+def interpolate_f0(data):
+    
+    #data = numpy.reshape(data, (datasize, 1))
+    datasize,n = np.shape(data)
+
+    vuv_vector = np.zeros((datasize, 1))
+    vuv_vector[data > 0.0] = 1.0
+    vuv_vector[data <= 0.0] = 0.0   
+
+    ip_data = data        
+
+    frame_number = datasize
+    last_value = 0.0
+    for i in xrange(frame_number):
+        if data[i] <= 0.0:
+            j = i+1
+            for j in range(i+1, frame_number):
+                if data[j] > 0.0:
+                    break
+            if j < frame_number-1:
+                if last_value > 0.0:
+                    step = (data[j] - data[i-1]) / float(j - i)
+                    for k in range(i, j):
+                        ip_data[k] = data[i-1] + step * (k - i + 1)
+                else:
+                    for k in range(i, j):
+                        ip_data[k] = data[j]
+            else:
+                for k in range(i, frame_number):
+                    ip_data[k] = last_value
+        else:
+            ip_data[i] = data[i]
+            last_value = data[i]
+
+    return  ip_data, vuv_vector   
+
+def coefficient_smoothing(data, win_size):
+
+	smoothed_data = np.transpose(data)
+	smoothed_data = temporal_smoothing(smoothed_data, win_size)
+	smoothed_data = np.transpose(smoothed_data)
+
+	return smoothed_data
 
 def temporal_smoothing(data, win_size):
 
@@ -58,7 +131,9 @@ def temporal_smoothing(data, win_size):
 	num_coeff  = data.shape[1]
 
 	smoothed_data = data*0.0
-	window  = np.transpose ( np.tile( np.hanning( win_size ) , (num_coeff , 1) ) )
+	window  = np.hanning( win_size )
+	win_w   = np.sum(window, axis=0)
+	window  = np.transpose ( np.tile( window , (num_coeff , 1) ) )
 	
 	for f in range(num_frames):
 
@@ -71,7 +146,7 @@ def temporal_smoothing(data, win_size):
 		else:
 			win_data = data[f-half_win:f+half_win+1,:]
 
-		smoothed_data[f, :] = np.mean( win_data * window , axis = 0 )
+		smoothed_data[f, :] = np.sum( win_data * window , axis = 0 ) / win_w
 		
 	return smoothed_data
 
