@@ -37,7 +37,10 @@ then
 	then
 		echo "--- Synthesizing waveforms"
 		python ${MerlinDir}/misc/scripts/vocoder/${vocoder}/synthesis.py ${MerlinDir} ${outdir} ${outdir}'/resyn/' ${SamplingFreq} ${file_list}
-	fi
+		rm ${outdir}'/resyn/'*'f0'*
+                rm ${outdir}'/resyn/'*'sp'
+                rm ${outdir}'/resyn/'*'bapd'
+        fi
 
 elif [ $vocoder == 'magphase' ]
 then
