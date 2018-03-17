@@ -467,10 +467,22 @@ mv  /group/project/cstr2/oliver_AMT_2013-05-08/hybrid_work_backup_20180312/  /gr
 
 ### Temporal smoothing and variance scaling
 
+Temporal smoothing and variance scaling. For no smoothing: -w 1 and -s 1.0
+
 ```
 python ./script_data/smooth_data.py -f unsmoothed_feat_dir -o smoothed_feat_dir -m 60 -t mag -w 5 -s 0.8
 ```
 
+To smooth WORLD or Magphase features:
+```
+./script/smooth_features.sh input_dir output_dir vocoder temporal_scaling variance_scaling file_list resynth
+
+WORLD:
+./script/smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/world/ /afs/inf.ed.ac.uk/group/cstr/projects/nst/cvbotinh/SCRIPT/Smoothing/WORLD/smoothed/ world 5 0.8 file_list.txt 1
+
+MAGPHASE:
+./script/smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/ /afs/inf.ed.ac.uk/group/cstr/projects/nst/cvbotinh/SCRIPT/Smoothing/magphase/smoothed/ magphase 5 0.8 file_list.txt 1
+```
 
 
 
