@@ -64,11 +64,13 @@ def main():
 
 		smoothed_data = data
 
-		if 'f0' in data_ext: # interpolate F0
-			smoothed_data , vuv = interpolate_f0(smoothed_data)
-
-		if 'ap' in data_ext: # interpolate F0
-			smoothed_data, vuv = interpolate_bap(smoothed_data)
+                if twin_size != 1 or cwin_size != 1 or std_scale != 1.0:
+			if 'f0' in data_ext: # interpolate F0
+				smoothed_data , vuv = interpolate_f0(smoothed_data)
+			if 'ap' in data_ext: # interpolate BAP
+				smoothed_data, vuv = interpolate_bap(smoothed_data)
+			if 'real' in data_ext or 'imag' in data_ext: # interpolate REAL/IMAG
+				smoothed_data, vuv = interpolate_real_imag(smoothed_data)
 
 		if twin_size != 1:
 			smoothed_data = temporal_smoothing(smoothed_data, twin_size)
@@ -77,13 +79,29 @@ def main():
 		if std_scale != 1.0:
 			smoothed_data = variance_scaling(smoothed_data, std_scale)
 
-		if 'f0' in data_ext: # inforce original V/UV
-			smoothed_data[vuv==0.0] = -1.0000e+10
-
-		if 'ap' in data_ext: # inforce original V/UV
-			smoothed_data[vuv==0.0,:] = 0.0
+		if twin_size != 1 or cwin_size != 1 or std_scale != 1.0:
+			if 'f0' in data_ext: # inforce original V/UV
+				smoothed_data[vuv==0.0] = -1.0000e+10
+			if 'ap' in data_ext or 'real' in data_ext or 'imag' in data_ext: # inforce original V/UV
+				smoothed_data[vuv==0.0,:] = 0.0
 
 		array_to_binary_file(smoothed_data, out_file_name)
+
+# more dimensions and ap values are always negative
+def interpolate_real_imag(data): 
+
+	num_frames = data.shape[0]
+	num_coeff  = data.shape[1]
+	ipdata     = data
+	for n in range(num_coeff):
+		data_coeff   = np.reshape( data[:,n] , ( num_frames , 1) )
+		data_coeff[ data_coeff != 0.0 ] += 2.0
+		ipdata_coeff , vuv = interpolate_f0(data_coeff)
+		ipdata[:,n]  = np.squeeze(ipdata_coeff) - 2.0
+
+	vuv = np.squeeze(vuv)
+
+	return ipdata, vuv
 
 # more dimensions and ap values are always negative
 def interpolate_bap(data): 
