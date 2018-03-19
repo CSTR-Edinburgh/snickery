@@ -273,13 +273,16 @@ def main_work(config, overwrite_existing_data=False):
     for base in flist:
 
         print base    
-        wname = os.path.join(config['wav_datadir'], base + '.wav')
+        
         pm_file = os.path.join(config['pm_datadir'], base + '.pm')
 
-
-        if not os.path.isfile(wname):
-            print 'Warning: no wave -- skip!'
-            continue
+        ## only actually need wave in sample case:-
+        if config['target_representation'] == 'sample':
+            wname = os.path.join(config['wav_datadir'], base + '.wav')
+            if not os.path.isfile(wname):
+                print 'Warning: no wave -- skip!'
+                continue
+                
         if not(os.path.isfile(pm_file)):
             print 'Warning: no pm -- skip!'
             continue

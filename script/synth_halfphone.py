@@ -14,8 +14,8 @@ import random
 from argparse import ArgumentParser
 
 # Cassia added
-import smoothing.fft_feats as ff
-import smoothing.libwavgen as lwg
+# import smoothing.fft_feats as ff
+# import smoothing.libwavgen as lwg
 #import smoothing.libaudio as la
 
 
@@ -78,6 +78,11 @@ import cPickle as pickle
 import pylab
 
 # verbose = False # True # False
+
+APPLY_JCW_ON_TOP = True     ## for IS2018 -- scale weights by jcw
+
+from const import FFTHALFLEN 
+HALFFFTLEN = FFTHALFLEN
 
 ## TODO: where to put this?
 def zero_pad_matrix(a, start_pad, end_pad):
@@ -153,6 +158,10 @@ class Synthesiser(object):
         execfile(config_file, self.config)
         del self.config['__builtins__']
         
+
+        self.config_file = config_file   ## in case we need to refresh...
+
+
         self.stream_list_target = self.config['stream_list_target']
         self.stream_list_join = self.config['stream_list_join']
 
@@ -233,10 +242,20 @@ class Synthesiser(object):
 
 
 
-        if self.config.get('weight_target_data', True):
-            self.set_target_weights(self.config['target_stream_weights'])
-        if self.config.get('weight_join_data', True):
-            self.set_join_weights(self.config['join_stream_weights'])
+
+
+
+        if APPLY_JCW_ON_TOP:
+            if self.config.get('weight_target_data', True):
+                self.set_target_weights(np.array(self.config['target_stream_weights']) * (1.0 - self.config['join_cost_weight'])) 
+            if self.config.get('weight_join_data', True):
+                self.set_join_weights(np.array(self.config['join_stream_weights']) * self.config['join_cost_weight'])
+
+        else:
+            if self.config.get('weight_target_data', True):
+                self.set_target_weights(self.config['target_stream_weights'])
+            if self.config.get('weight_join_data', True):
+                self.set_join_weights(self.config['join_stream_weights'])
 
         # if 'truncate_target_streams' in self.config:
         #     self.truncate_target_streams(self.config['truncate_target_streams'])
@@ -387,15 +406,18 @@ class Synthesiser(object):
         '''
         Currently used by weight tuning script -- adjust configs and rebuild trees etc as 
         necessary
+
+        Return True if anything has changed in config, else False
         '''
         print 'reconfiguring synthesiser...'
         assert self.config['target_representation'] == 'epoch'
         assert self.config['greedy_search']
 
-        for key in ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', 'search_epsilon', 'multiepoch']:
+        for key in ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', 'search_epsilon', 'multiepoch', 'magphase_use_target_f0', 'magphase_overlap']:
             assert key in changed_config_values, key
 
         rebuild_tree = False
+        small_change = False ## dont need to rebuild, but register a change has happened
         
         if self.config['join_cost_weight'] != changed_config_values['join_cost_weight']:
             self.config['join_cost_weight'] = changed_config_values['join_cost_weight']
@@ -415,22 +437,50 @@ class Synthesiser(object):
 
         if self.config.get('search_epsilon', 1.0) != changed_config_values['search_epsilon']:
             self.config['search_epsilon'] = changed_config_values['search_epsilon']
+            small_change = True
 
         if self.config.get('magphase_use_target_f0', True) != changed_config_values['magphase_use_target_f0']:
             self.config['magphase_use_target_f0'] = changed_config_values['magphase_use_target_f0']
+            small_change = True
 
         if self.config.get('magphase_overlap', 0) != changed_config_values['magphase_overlap']:
             self.config['magphase_overlap'] = changed_config_values['magphase_overlap']
-
+            small_change = True
 
         if rebuild_tree:
             print 'set join weights after reconfiguring'
-            self.set_join_weights(np.array(self.config['join_stream_weights']) * changed_config_values['join_cost_weight'])
+            self.set_join_weights(np.array(self.config['join_stream_weights']) * self.config['join_cost_weight'])
             print 'set target weights after reconfiguring'
-            self.set_target_weights(np.array(self.config['target_stream_weights']) * (1.0 - changed_config_values['join_cost_weight']))   
+            self.set_target_weights(np.array(self.config['target_stream_weights']) * (1.0 - self.config['join_cost_weight']))   
             print 'tree...'           
             self.get_tree_for_greedy_search()
             print 'done'
+
+        return (rebuild_tree or small_change)
+
+
+
+    def reconfigure_from_config_file(self):
+        '''
+        Currently used by weight tuning script -- adjust configs and rebuild trees etc as 
+        necessary
+        '''
+        print 'Refresh config...'
+        refreshed_config = {}
+        execfile(self.config_file, refreshed_config)
+        del refreshed_config['__builtins__']
+
+        keys = ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', 'search_epsilon', 'multiepoch', 'magphase_use_target_f0', 'magphase_overlap']
+            
+        changed_config_values = [refreshed_config[key] for key in keys]
+        changed_config_values = dict(zip(keys, changed_config_values))
+        anything_changed = self.reconfigure_settings(changed_config_values)
+
+        return anything_changed
+
+        
+
+
     def get_tree_for_greedy_search(self):
 
         m,n = self.unit_start_data.shape
@@ -1449,7 +1499,7 @@ def get_facts(vals):
         #fshift = int(self.config['sample_rate'] * fshift_seconds)        
 
         if self.config['target_representation'] == 'epoch':
-            unit_features = speech[1:-1, :]
+            unit_features = speech[1:-1, :]  ### TODO??
         else:
             labfile = os.path.join(lab_dir, base + '.' + self.config['lab_extension'])
             labs = read_label(labfile, self.quinphone_regex)
@@ -2315,7 +2365,7 @@ def get_facts(vals):
         '''
         preload utts used for a given path
         '''
-        HALFFFTLEN = 513  ## TODO
+        #HALFFFTLEN = 513  ## TODO
         for index in path:
             if self.train_filenames[index] in self.waveforms: # self.config['hold_waves_in_memory']:  ### i.e. waves or magphase FFT spectra
                 (mag_full, real_full, imag_full, f0_interp, vuv) = self.waveforms[self.train_filenames[index]]  
@@ -2329,7 +2379,7 @@ def get_facts(vals):
 
 
     def preload_all_magphase_utts(self):
-        HALFFFTLEN = 513  ## TODO
+        #HALFFFTLEN = 513  ## TODO
         start_time = self.start_clock('Preload magphase utts for corpus')
         for base in np.unique(self.train_filenames):
             print base
@@ -2345,7 +2395,7 @@ def get_facts(vals):
 
 
     def retrieve_magphase_frag(self, index, extra_frames=0):
-        HALFFFTLEN = 513  ## TODO
+        #HALFFFTLEN = 513  ## TODO
 
         if 0:
             print 'retrieving fragment'
@@ -2625,7 +2675,7 @@ def get_facts(vals):
     def concatenateMagPhaseEpoch_sep_files(self, path, fname, fzero=np.zeros(0), overlap=0):
         assert overlap % 2 == 0, 'frame overlap should be even number'
 
-        FFTHALFLEN = 513 # TODO
+
 
 
         multiepoch = self.config.get('multiepoch', 1)
