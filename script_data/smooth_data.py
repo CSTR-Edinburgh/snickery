@@ -178,10 +178,12 @@ def temporal_smoothing(data, win_size):
 	for f in range(num_frames):
 
 		if f-half_win < 0: 
-			pad = np.zeros( ( np.abs(f-half_win) , num_coeff) )
+			#pad = np.zeros( ( np.abs(f-half_win) , num_coeff) )
+			pad = np.repeat( data[0,:].reshape(1,-1), np.abs(f-half_win), axis=0 )
 			win_data = np.concatenate( ( pad , data[:f+half_win+1,:]))
 		elif f+half_win+1 > num_frames:
-			pad = np.zeros( ( f+half_win+1 - num_frames , num_coeff) )
+			#pad = np.zeros( ( f+half_win+1 - num_frames , num_coeff) )
+			pad = np.repeat( data[-1,:].reshape(1,-1), f+half_win+1 - num_frames, axis=0 )
 			win_data = np.concatenate( ( data[f-half_win:,:] , pad ))
 		else:
 			win_data = data[f-half_win:f+half_win+1,:]
