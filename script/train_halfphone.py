@@ -157,12 +157,12 @@ def main_work(config, overwrite_existing_data=False):
 
     f = h5py.File(database_fname, "w")
 
-    mean_target_dset = f.create_dataset("mean_target", np.shape(mean_vec_target), dtype='f')
-    std_target_dset = f.create_dataset("std_target", np.shape(std_vec_target), dtype='f')
+    mean_target_dset = f.create_dataset("mean_target", np.shape(mean_vec_target), dtype='f', track_times=False)
+    std_target_dset = f.create_dataset("std_target", np.shape(std_vec_target), dtype='f', track_times=False)
 
     if config['joincost_features']:
-        mean_join_dset = f.create_dataset("mean_join", np.shape(mean_vec_join), dtype='f')
-        std_join_dset = f.create_dataset("std_join", np.shape(std_vec_join), dtype='f')
+        mean_join_dset = f.create_dataset("mean_join", np.shape(mean_vec_join), dtype='f', track_times=False)
+        std_join_dset = f.create_dataset("std_join", np.shape(std_vec_join), dtype='f', track_times=False)
 
     mean_target_dset[:] = mean_vec_target[:]
     std_target_dset[:] = std_vec_target[:]
@@ -223,34 +223,34 @@ def main_work(config, overwrite_existing_data=False):
         total_target_dim = config['wave_context_length'] + target_rep_size
 
     ## maxshape makes a dataset resizable
-    train_dset = f.create_dataset("train_unit_features", (n_units, total_target_dim), maxshape=(n_units, total_target_dim), dtype='f') 
+    train_dset = f.create_dataset("train_unit_features", (n_units, total_target_dim), maxshape=(n_units, total_target_dim), dtype='f', track_times=False) 
 
     if config['target_representation']  == 'sample': 
         #wavecontext_dset = f.create_dataset("wavecontext", (n_units, config['wave_context_length']), maxshape=(n_units,config['wave_context_length']), dtype='i') 
-        nextsample_dset = f.create_dataset("nextsample", (n_units, 1), maxshape=(n_units,1), dtype='f') 
+        nextsample_dset = f.create_dataset("nextsample", (n_units, 1), maxshape=(n_units,1), dtype='f', track_times=False) 
 
     else:
-        phones_dset = f.create_dataset("train_unit_names", (n_units,), maxshape=(n_units,), dtype='|S50') 
-        filenames_dset = f.create_dataset("filenames", (n_units,), maxshape=(n_units,), dtype='|S50') 
-        unit_index_within_sentence_dset = f.create_dataset("unit_index_within_sentence_dset", (n_units,), maxshape=(n_units,), dtype='i') 
+        phones_dset = f.create_dataset("train_unit_names", (n_units,), maxshape=(n_units,), dtype='|S50', track_times=False) 
+        filenames_dset = f.create_dataset("filenames", (n_units,), maxshape=(n_units,), dtype='|S50', track_times=False) 
+        unit_index_within_sentence_dset = f.create_dataset("unit_index_within_sentence_dset", (n_units,), maxshape=(n_units,), dtype='i', track_times=False) 
 
         if config['target_representation'] == 'epoch':
-            cutpoints_dset = f.create_dataset("cutpoints", (n_units,3), maxshape=(n_units,3), dtype='i') 
+            cutpoints_dset = f.create_dataset("cutpoints", (n_units,3), maxshape=(n_units,3), dtype='i', track_times=False) 
         else:
-            cutpoints_dset = f.create_dataset("cutpoints", (n_units,2), maxshape=(n_units,2), dtype='i') 
+            cutpoints_dset = f.create_dataset("cutpoints", (n_units,2), maxshape=(n_units,2), dtype='i', track_times=False) 
 
         # hardcoded for pitch sync cost, unless epoch selection, in whcih case natural 2:
         if config['target_representation'] == 'epoch':
             join_dim *= 2
 
-        join_contexts_dset = f.create_dataset("join_contexts", (n_units + 1, join_dim), maxshape=(n_units + 1, join_dim), dtype='f') 
+        join_contexts_dset = f.create_dataset("join_contexts", (n_units + 1, join_dim), maxshape=(n_units + 1, join_dim), dtype='f', track_times=False) 
 
 
     if config.get('store_full_magphase', False):
-        mp_mag_dset = f.create_dataset("mp_mag", (n_units, 513), maxshape=(n_units, 513), dtype='f') 
-        mp_imag_dset = f.create_dataset("mp_imag", (n_units, 513), maxshape=(n_units, 513), dtype='f') 
-        mp_real_dset = f.create_dataset("mp_real", (n_units, 513), maxshape=(n_units, 513), dtype='f')   
-        mp_fz_dset = f.create_dataset("mp_fz", (n_units, 1), maxshape=(n_units, 1), dtype='f')   
+        mp_mag_dset = f.create_dataset("mp_mag", (n_units, 513), maxshape=(n_units, 513), dtype='f', track_times=False) 
+        mp_imag_dset = f.create_dataset("mp_imag", (n_units, 513), maxshape=(n_units, 513), dtype='f', track_times=False) 
+        mp_real_dset = f.create_dataset("mp_real", (n_units, 513), maxshape=(n_units, 513), dtype='f', track_times=False)   
+        mp_fz_dset = f.create_dataset("mp_fz", (n_units, 1), maxshape=(n_units, 1), dtype='f', track_times=False)   
 
 
     ## Optionally dump some extra data which can be used for training a better join cost:-
@@ -258,8 +258,8 @@ def main_work(config, overwrite_existing_data=False):
         join_database_fname = get_data_dump_name(config, joindata=True)
         fjoin = h5py.File(join_database_fname, "w")
         halfwin = config['join_cost_halfwidth']
-        start_join_feats_dset = fjoin.create_dataset("start_join_feats", (n_units, halfwin*join_dim), maxshape=(n_units, halfwin*join_dim), dtype='f') 
-        end_join_feats_dset = fjoin.create_dataset("end_join_feats", (n_units, halfwin*join_dim), maxshape=(n_units, halfwin*join_dim), dtype='f') 
+        start_join_feats_dset = fjoin.create_dataset("start_join_feats", (n_units, halfwin*join_dim), maxshape=(n_units, halfwin*join_dim), dtype='f', track_times=False) 
+        end_join_feats_dset = fjoin.create_dataset("end_join_feats", (n_units, halfwin*join_dim), maxshape=(n_units, halfwin*join_dim), dtype='f', track_times=False) 
 
 
     ## Standardise data (within streams), compose, add VUV, fill F0 gaps with utterance mean voiced value: 
@@ -548,7 +548,7 @@ def main_work(config, overwrite_existing_data=False):
 
 
         ## Store waveform standardisation info:
-        wave_mu_sigma_dset = f.create_dataset("wave_mu_sigma", np.shape(wave_mu_sigma), dtype='f')
+        wave_mu_sigma_dset = f.create_dataset("wave_mu_sigma", np.shape(wave_mu_sigma), dtype='f', track_times=False)
         wave_mu_sigma_dset[:] = wave_mu_sigma 
 
     if config.get('store_full_magphase', False):
