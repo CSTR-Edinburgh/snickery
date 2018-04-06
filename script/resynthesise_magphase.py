@@ -39,12 +39,13 @@ def synthesis(base, feature_dir='', output_dir='', fft_len=2048, nbins_mel=60, n
     m_imag_mel = lu.read_binfile(os.path.join(feature_dir, 'imag', base+'.imag'), dim=nbins_phase)
     v_lf0 = lu.read_binfile(os.path.join(feature_dir, 'lf0', base+'.lf0'), dim=1)
 
-    v_syn_sig = mp.synthesis_from_compressed(m_mag_mel_log, m_real_mel, m_imag_mel, v_lf0, fs, fft_len)
-
-    wav_file_syn = os.path.join(output_dir, base+'.wav')
-    la.write_audio_file(wav_file_syn, v_syn_sig, fs)
-
-    print 'written %s'%(wav_file_syn)
+    try:
+        v_syn_sig = mp.synthesis_from_compressed(m_mag_mel_log, m_real_mel, m_imag_mel, v_lf0, fs, fft_len)
+        wav_file_syn = os.path.join(output_dir, base+'.wav')
+        la.write_audio_file(wav_file_syn, v_syn_sig, fs)
+        print 'written %s'%(wav_file_syn)
+    except:
+        print 'synth failed for %s'%(base)
 
 if __name__ == '__main__':
 
@@ -69,6 +70,15 @@ if __name__ == '__main__':
     safe_makedir(opts.output_dir)
     
     baselist = [basename(fname) for fname in sorted(glob.glob(opts.feature_dir + '/lf0/*.lf0'))]
+
+    #### temp
+    # baselist2 = []
+    # for base in baselist:
+    #     if int(base.replace('hvd_', '')) > 600:
+    #         baselist2.append(base)
+    # baselist = baselist2
+
+
     if opts.pattern:
         baselist = [b for b in baselist if opts.pattern in b]
 

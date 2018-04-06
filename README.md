@@ -372,6 +372,27 @@ print ascore + cscore
 print ascore * cscore
 ```
 
+import math
+import numpy as np
+
+jn = np.array([3,4,6])
+jt = np.array([3.3,1,67])
+
+tn = np.array([13,14,116,9])
+tt = np.array([1.3,14.4,46,39])
+
+def euc(a,b):
+    return math.sqrt(((a - b) * (a - b)).sum(axis=0))
+
+sep = euc(jn, jt) + euc(tn, tt)
+comb = euc(np.concatenate([jn, tn]), np.concatenate([jt, tt]))
+print sep
+print comb
+
+
+
+
+
 
 ## Setup and experiments for IS2018
 
@@ -539,3 +560,797 @@ python ./script/extract_magphase_features.py -w $WAV -o ~/sim2/oliver/hybrid_wor
 #### 1000 utts:
 
  ~/scripts/sum_waves.py /tmp/out1000.wav /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/wp2/synched_from_hynek/B002DET/synthesis/epoch_20/hvd_001_1.wav  /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/nick_work_02_16k_resid/synthesis_test/1000_utts_jstreams-mag-real-imag_tstreams-mag-lf0_rep-epoch/greedy-yes_target-1.0-1.0_join-0.2-0.2-0.2_scale-1.0_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-4/hvd_001_1.wav 0.8 0.2
+
+
+
+## IS2018 exps
+
+### Test cep vs magphase on 100 sentences
+
+find /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/high/f0/ | while read fname ; do basename  $fname .f0  ; done | grep herald | sort > /afs/inf.ed.ac.uk/user/o/owatts/sim2/oliver/hybrid_work/IS2018_exps/trainlist_nick.txt
+
+
+Use snickey config:
+
+./snickery/config/IS2018_nick_cep_vs_mp.cfg
+
+
+cd /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery
+
+python ./script/train_halfphone.py -c ./config/IS2018_nick_cep_vs_mp.cfg
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+python ./script/synth_halfphone.py -c ./config/IS2018_nick_cep_vs_mp.cfg
+
+
+output here:
+
+/afs/inf.ed.ac.uk/user/o/owatts/sim2/oliver/hybrid_work/IS2018_exps/voices/cep_vs_spec/synthesis_test/100_utts_jstreams-lf0-mag-real-imag-mag_cc-real_cc-imag_cc_tstreams-mag-lf0-mag_cc_rep-epoch/greedy-yes_target-0.333333333333-0.333333333333-0.333333333333_join-0.142857142857-0.142857142857-0.142857142857-0.142857142857-0.142857142857-0.142857142857-0.142857142857_scale-0.5_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-4/
+
+
+Copy nick HDF data to laptop for tuning:
+
+dice_scp /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/nick_01.h5
+mv ~/Desktop/nick_01.h5 ~/proj/hybrid/local_data_dumps/
+
+
+sep voices for MP and CEP:
+
+  568  python ./script/train_halfphone.py -c ./config/IS2018_nick_cep_vs_mp_CEP.cfg
+  571  python ./script/train_halfphone.py -c ./config/IS2018_nick_cep_vs_mp_MP.cfg 
+
+
+
+
+have to copy low dim harvard for test set:
+
+mkdir -p  ~/sim2/oliver/hybrid_work/data/nick_test_sets/magphase/low/
+for STREAM in imag  imag_cc  lf0  mag  mag_cc  real  real_cc ; do 
+   mkdir -p  ~/sim2/oliver/hybrid_work/data/nick_test_sets/magphase/low/$STREAM ; 
+   cp  ~/pr/cvbotinh/SCRIPT/Nick/feats/magphase/low/$STREAM/hvd* ~/sim2/oliver/hybrid_work/data/nick_test_sets/magphase/low/$STREAM ; 
+done
+
+
+... and adjust test_data_dirs in config too
+
+
+
+tune on laptop:
+
+python ./script/synth_halfphone_GUI.py -c ./config/IS2018_nick_cep_vs_mp_CEP.cfg -o ~/sim2/oliver/hybrid_work/tuning/IS2018_nick_cep_vs_mp_CEP
+
+
+
+### full nick voice, use MP rep:
+
+
+cd /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+
+python ./script/train_halfphone.py -c ./config/IS2018_nick_magphase60.cfg
+python ./script/synth_halfphone.py -c ./config/IS2018_nick_magphase60.cfg
+
+
+/afs/inf.ed.ac.uk/user/o/owatts/sim2/oliver/hybrid_work/IS2018_exps/voices/cep_vs_spec2/synthesis_test/0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6/*wav
+
+
+mv /afs/inf.ed.ac.uk/user/o/owatts/sim2/oliver/hybrid_work/IS2018_exps/voices/cep_vs_spec2/ /afs/inf.ed.ac.uk/user/o/owatts/sim2/oliver/hybrid_work/IS2018_exps/voices/nick_01/
+
+
+
+### Norwegian only voice !!
+
+cd /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+
+python ./script/train_halfphone.py -c ./config/IS2018_norwegian_magphase60.cfg
+python ./script/synth_halfphone.py -c ./config/IS2018_norwegian_magphase60.cfg
+
+
+
+/afs/inf.ed.ac.uk/user/o/owatts/sim2/oliver/hybrid_work/IS2018_exps/voices/nor01/synthesis_test/0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6/
+
+### VCTK only voice !!
+
+
+
+
+Softlink to top 6 speakers:
+
+[lubbock]owatts: more /afs/inf.ed.ac.uk/group/cstr/projects/nst/cvbotinh/SCRIPT/SpeakerSelection/selected_speakers.txt
+p304
+p334
+p374
+p298
+p246
+p292
+p347
+p243
+p227
+p272
+p258
+p364
+p226
+p259
+p252
+p345
+p260
+p270
+
+
+
+
+[salton]owatts: ls /group/project/cstr2/cvbotinh/SCRIPT/VCTK-Corpus/feats/p{304,334,374,298,246,292}/pm/*pm | wc -l
+2444
+
+
+mkdir ~/sim2/oliver/hybrid_work/data/VCTK_softlinks/top_6_speakers
+
+
+FROM=/group/project/cstr2/cvbotinh/SCRIPT/VCTK-Corpus/feats/
+TO=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/VCTK_softlinks/top_6_speakers
+
+for SUBDIR in high low pm shift high/f0/ high/imag/ high/mag/ high/real/ low/imag/ low/imag_cc/ low/lf0/ low/mag/ low/mag_cc/ low/real/ low/real_cc/ ; do 
+  mkdir -p $TO/$SUBDIR ;
+  cp -rs $FROM/p{304,334,374,298,246,292}/$SUBDIR/* $TO/$SUBDIR/ ;
+done
+
+
+Lubbock:
+
+cd /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+
+python ./script/train_halfphone.py -c ./config/IS2018_vctk6speakers_magphase60.cfg
+python ./script/synth_halfphone.py -c ./config/IS2018_vctk6speakers_magphase60.cfg
+
+/afs/inf.ed.ac.uk/user/o/owatts/sim2/oliver/hybrid_work/IS2018_exps/voices/vctk01/synthesis_test/0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6/
+
+
+
+#### VCTK separate speakers -- softlink data:
+
+FROM=/group/project/cstr2/cvbotinh/SCRIPT/VCTK-Corpus/feats/
+for SPKR in p304 p334 p374 p298 p246 p292 ; do
+    TO=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/VCTK_softlinks/VCTK_${SPKR}/
+    mkdir -p $TO
+    for SUBDIR in high low pm shift high/f0/ high/imag/ high/mag/ high/real/ low/imag/ low/imag_cc/ low/lf0/ low/mag/ low/mag_cc/ low/real/ low/real_cc/ ; do 
+      mkdir -p $TO/$SUBDIR ;
+      cp -rs $FROM/$SPKR/$SUBDIR/* $TO/$SUBDIR/ ;
+    done
+done
+
+
+## prep configs
+cp ./config/IS2018_vctk6speakers_magphase60.cfg ./config/IS2018_vctk1speaker_p246_magphase60.cfg
+
+subl  ./config/IS2018_vctk1speaker_p246_magphase60.cfg
+
+
+for SPKR in p304 p334 p374 p298 p292 ; do  cp ./config/IS2018_vctk1speaker_p246_magphase60.cfg ./config/IS2018_vctk1speaker_${SPKR}_magphase60.cfg; done
+
+
+
+subl ./config/IS2018_vctk1speaker_*_magphase60.cfg
+
+## lubbock
+
+for SPKR in p304 p334 p374 p298 p246 p292 ; do
+    python ./script/train_halfphone.py -c ./config/IS2018_vctk1speaker_${SPKR}_magphase60.cfg -X
+done
+
+
+for SPKR in p304 p334 p374 p298 p246 p292 ; do
+    python ./script/synth_halfphone.py -c ./config/IS2018_vctk1speaker_${SPKR}_magphase60.cfg
+done
+
+
+
+cd /group/project/cstr2/owatts
+SPKR=p304
+python /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery/script/synth_halfphone.py -c /afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery/config/IS2018_vctk1speaker_${SPKR}_magphase60.cfg
+
+
+SNICKERY=/afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery
+for SPKR in p334 p374 p298 p246 p292 ; do
+    python $SNICKERY/script/synth_halfphone.py -c $SNICKERY/config/IS2018_vctk1speaker_${SPKR}_magphase60.cfg
+done
+
+
+
+
+
+
+
+VOICES=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices
+
+COND=0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6
+
+python  ~/scripts/make_internal_webchart.py \
+        natural /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/data/nick/wav \
+        NICK $VOICES/nick_01/synthesis_test/$COND/  \
+        VCTK6 $VOICES/vctk01/synthesis_test/$COND/  \
+        VCTK_p304 $VOICES/vctk02_p304/synthesis_test/$COND/  \
+        VCTK_p334 $VOICES/vctk02_p334/synthesis_test/$COND/  \
+        VCTK_p374 $VOICES/vctk02_p374/synthesis_test/$COND/  \
+        VCTK_p298 $VOICES/vctk02_p298/synthesis_test/$COND/  \
+        VCTK_p246 $VOICES/vctk02_p246/synthesis_test/$COND/  \
+        VCTK_p292 $VOICES/vctk02_p292/synthesis_test/$COND/  \
+        Norw_senn_pt1 $VOICES/nor01/synthesis_test/$COND/          >   $VOICES/index.html      
+
+
+
+VOICES=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices
+
+SMWORLD=/afs/inf.ed.ac.uk/group/cstr/projects/nst/cvbotinh/SCRIPT/Smoothing/WORLD/
+
+COND=0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6
+
+python  ~/scripts/make_internal_webchart.py \
+        natural /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/data/nick/wav \
+        World $VOICES/WORLD/  \
+        Magphase $VOICES/MAGPHASE \
+        World_vs0.6 $SMWORLD/smoothed_ts5_vs0.6 \
+        World_vs0.7 $SMWORLD/smoothed_ts5_vs0.7 \
+        World_vs0.8 $SMWORLD/smoothed_ts5_vs0.8 \
+        NICK $VOICES/nick_01/synthesis_test/$COND/  \
+        VCTK6 $VOICES/vctk01/synthesis_test/$COND/  \
+        VCTK_p304 $VOICES/vctk02_p304/synthesis_test/$COND/  \
+        VCTK_p334 $VOICES/vctk02_p334/synthesis_test/$COND/  \
+        VCTK_p374 $VOICES/vctk02_p374/synthesis_test/$COND/  \
+        VCTK_p298 $VOICES/vctk02_p298/synthesis_test/$COND/  \
+        VCTK_p246 $VOICES/vctk02_p246/synthesis_test/$COND/  \
+        VCTK_p292 $VOICES/vctk02_p292/synthesis_test/$COND/  \
+        Norw_senn_pt1 $VOICES/nor01/synthesis_test/$COND/          >   $VOICES/index.html      
+
+
+
+
+~/sim2/oliver/hybrid_work/IS2018_exps/voices/WORLD
+
+
+
+
+
+---- made magphse resynt:
+
+ python ~/proj/slm-local/snickery/script/resynthesise_magphase.py -f /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/ -o ~/sim2/oliver/temp/nickout -fftlen 2048 -ncores 25 -pattern hvd
+
+cp -r /afs/inf.ed.ac.uk/user/o/owatts/sim2/oliver/temp/nickout ~/sim2/oliver/hybrid_work/IS2018_exps/voices/MAGPHASE/
+
+
+
+
+
+----- tune nick 01:
+
+5:20
+
+
+python ./script/synth_halfphone_GUI.py -c ./config/IS2018_nick_magphase60.cfg -o ~/sim2/oliver/hybrid_work/tuning/IS2018_nick_magphase60
+
+
+
+test: 
+
+python ~/proj/slm-local/snickery/script/synth_halfphone_NOGUI.py -c ~/proj/slm-local/snickery/config/IS2018_vctk1speaker_p246_magphase60.cfg -o ~/sim2/oliver/temp/test1
+
+
+
+
+------- nick -- smooth data in various conditions:
+
+Make train list:
+```
+ls /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/lf0/*.lf0 | grep herald | while read name ; do basename $name .lf0 ; done > /group/project/cstr2/cvbotinh/SCRIPT/Nick/trainlist.txt
+```
+
+cd ./script
+
+./smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/ /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/smoothed/ magphase 5 0.8 /group/project/cstr2/cvbotinh/SCRIPT/Nick/trainlist.txt 0
+
+./smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/ /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/smoothed/ magphase 5 0.6 /group/project/cstr2/cvbotinh/SCRIPT/Nick/trainlist.txt 0
+
+./smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/ /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/smoothed/ magphase 11 0.6 /group/project/cstr2/cvbotinh/SCRIPT/Nick/trainlist.txt 0
+
+----- 
+and for test set (write to AFS):
+
+ls /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/lf0/*.lf0 | grep hvd | while read name ; do basename $name .lf0 ; done > /group/project/cstr2/cvbotinh/SCRIPT/Nick/testlist.txt
+```
+
+OUT=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/nick_test_sets
+
+cd ./script
+
+./smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/ $OUT/magphase/low/smoothed/ magphase 5 0.8 /group/project/cstr2/cvbotinh/SCRIPT/Nick/testlist.txt 0
+
+./smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/ $OUT/magphase/low/smoothed/ magphase 5 0.6 /group/project/cstr2/cvbotinh/SCRIPT/Nick/testlist.txt 0
+
+./smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/ $OUT/magphase/low/smoothed/ magphase 11 0.6 /group/project/cstr2/cvbotinh/SCRIPT/Nick/testlist.txt 
+```
+-----
+
+
+## resynthesise all hvd test set:
+
+OUT=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/nick_test_sets
+
+python ~/proj/slm-local/snickery/script/resynthesise_magphase.py -f $OUT/magphase/low/smoothed/ts5_vs0.8 -o $OUT/magphase/low/smoothed/ts5_vs0.8/resyn -m 60 -p 45 -fftlen 2048 -ncores 29 
+  
+python ~/proj/slm-local/snickery/script/resynthesise_magphase.py -f $OUT/magphase/low/smoothed/ts5_vs0.6 -o $OUT/magphase/low/smoothed/ts5_vs0.6/resyn -m 60 -p 45 -fftlen 2048 -ncores 29 
+  
+
+
+./smooth_features.sh 
+
+./smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/ $OUT/magphase/low/smoothed/ magphase 5 0.6 /group/project/cstr2/cvbotinh/SCRIPT/Nick/testlist.txt 0
+
+
+
+
+
+python ./script/train_halfphone.py -c ./config/IS2018_nick_smooth_ts11_vs6.cfg 
+python ./script/train_halfphone.py -c ./config/IS2018_nick_smooth_ts5_vs6.cfg  
+python ./script/train_halfphone.py -c ./config/IS2018_nick_smooth_ts5_vs8.cfg
+
+
+
+python ./script/synth_halfphone.py -c ./config/IS2018_nick_smooth_ts11_vs6.cfg 
+python ./script/synth_halfphone.py -c ./config/IS2018_nick_smooth_ts5_vs6.cfg  
+python ./script/synth_halfphone.py -c ./config/IS2018_nick_smooth_ts5_vs8.cfg
+
+
+
+----
+
+mismatched train/test conditions:  SKIP this for IS2018!
+
+
+cp config/IS2018_nick_smooth_ts11_vs6.cfg  config/IS2018_nick_smooth_ts11_vs6_mis.cfg
+cp config/IS2018_nick_smooth_ts5_vs6.cfg  config/IS2018_nick_smooth_ts5_vs6_mis.cfg  
+cp config/IS2018_nick_smooth_ts5_vs8.cfg config/IS2018_nick_smooth_ts5_vs8_mis.cfg
+
+python ./script/train_halfphone.py -c ./config/IS2018_nick_smooth_ts11_vs6_mis.cfg 
+python ./script/train_halfphone.py -c ./config/IS2018_nick_smooth_ts5_vs6_mis.cfg  
+python ./script/train_halfphone.py -c ./config/IS2018_nick_smooth_ts5_vs8_mis.cfg
+
+
+
+python ./script/synth_halfphone.py -c ./config/IS2018_nick_smooth_ts11_vs6_mis.cfg 
+python ./script/synth_halfphone.py -c ./config/IS2018_nick_smooth_ts5_vs6_mis.cfg  
+python ./script/synth_halfphone.py -c ./config/IS2018_nick_smooth_ts5_vs8_mis.cfg
+
+
+
+----
+
+
+VOICES=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices
+
+SMOO=/afs/inf.ed.ac.uk/group/cstr/projects/nst/cvbotinh/SCRIPT/Smoothing//
+
+COND=0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6
+
+python  ~/scripts/make_internal_webchart.py \
+        natural /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/data/nick/wav \
+        World $VOICES/WORLD/  \
+        Magphase $VOICES/MAGPHASE \
+        Snickery $VOICES/nick_01/synthesis_test/$COND/  \
+        World_ts5_vs0.8 $SMOO/WORLD/smoothed/ts5_vs0.8/resyn/ \
+        World_ts5_vs0.6 $SMOO/WORLD/smoothed/ts5_vs0.6/resyn/ \
+        World_ts11_vs0.6 $SMOO/WORLD/smoothed/ts11_vs0.6/resyn/ \
+        Mag_ts5_vs0.8 $SMOO/magphase/smoothed/ts5_vs0.8/resyn/ \
+        Mag_ts5_vs0.6 $SMOO/magphase/smoothed/ts5_vs0.6/resyn/ \
+        Mag_ts11_vs0.6 $SMOO/magphase/smoothed/ts11_vs0.6/resyn/ \
+        Sni_ts5_vs0.8 $VOICES/nick_smooth_ts5_vs0.8/synthesis_test/$COND/  \
+        Sni_ts5_vs0.6 $VOICES/nick_smooth_ts5_vs0.6/synthesis_test/$COND/  \
+        Sni_ts11_vs0.6 $VOICES/nick_smooth_ts11_vs0.6/synthesis_test/$COND/ > $VOICES/index_smoothing.html      
+
+
+
+
+### Experiments with adding noise
+
+Listen to single dev sentence with different noises added. noise from:
+
+http://homepages.inf.ed.ac.uk/cvbotinh/se/noises/
+
+Downloaded to:
+
+/Users/owatts/Downloads/babble_ssn
+
+
+
+### Normalise stimuli for experiments
+
+mkdir -p ~/sim2/oliver/hybrid_work/IS2018_exps/stimuli/experiment_1
+mkdir ~/sim2/oliver/hybrid_work/IS2018_exps/stimuli/experiment_1/{N,W0,M0,S0,M1,S1,M2,S2,A}
+
+
+
+PATH=$PATH:~/proj/slm-local/snickery/tool/
+
+
+VOICES=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices
+
+SMOO=/afs/inf.ed.ac.uk/group/cstr/projects/nst/cvbotinh/SCRIPT/Smoothing//
+
+COND=0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6
+
+
+STIM=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/stimuli/experiment_1
+
+
+
+
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/data/nick/wav/ -o $STIM/N/ -p hvd
+
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i $VOICES/WORLD/ -o $STIM/W0/ -p hvd
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i $VOICES/MAGPHASE/ -o $STIM/M0/ -p hvd
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i $VOICES/nick_01/synthesis_test/$COND/ -o $STIM/S0 -p hvd
+
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i $SMOO/magphase/smoothed/ts5_vs0.8/resyn/ -o $STIM/M1/ -p hvd
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i $VOICES/nick_smooth_ts5_vs0.8/synthesis_test/$COND/ -o $STIM/S1 -p hvd
+
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i $SMOO/magphase/smoothed/ts5_vs0.6/resyn/ -o $STIM/M2/ -p hvd
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i  $VOICES/nick_smooth_ts5_vs0.6/synthesis_test/$COND/ -o $STIM/S2 -p hvd
+
+
+### missing test: all but NAT and MAG
+
+python ~/proj/slm-local/snickery/script/normalise_level.py 
+
+
+## make html index, exclude anchor :
+
+python ~/proj/slm-local/snickery/script/make_internal_webchart.py -o $STIM/index.html -d $STIM/{N,W0,M0,S0,M1,S1,M2,S2}
+
+
+
+
+## Make anchor which attempts to combine artefacts found in all systems:
+
+Resyn waves from magphase smoothing conition 2:
+
+(hybrid_synthesiser)[lubbock]owatts: python ~/proj/slm-local/snickery/script/resynthesise_magphase.py -f /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/smoothed/ts5_vs0.6/ -o /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/smoothed/ts5_vs0.6/resyn -m 60 -p 45 -fftlen 2048 -ncores 29 -fs 48000 
+
+Extraczt features for anchor voice:
+
+python ~/proj/slm-local/snickery/script/extract_magphase_features.py -w /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/low/smoothed/ts5_vs0.6/resyn -o /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_for_anchor -m 60 -p 45 -fftlen 2048 -ncores 29 
+   
+Snickery:
+
+python ~/proj/slm-local/snickery/script/train_halfphone.py -c  ~/proj/slm-local/snickery/config/IS2018_nick_anchor.cfg
+python ~/proj/slm-local/snickery/script/synth_halfphone.py -c  ~/proj/slm-local/snickery/config/IS2018_nick_anchor.cfg
+
+
+Doesn't work (Because of the smoothing, I think the same unit is selected many times in a row, so it becomes very periodic (in a  very bad way) Hence the chainsaw type noise instead of silence):
+
+/afs/inf.ed.ac.uk/user/o/owatts/sim2/oliver/hybrid_work/IS2018_exps/voices/nick_anchor/synthesis_test/0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6/
+
+## Anchor attemp 2: Vocode and smooth snickery ouput (S2).
+
+## Extract features for anchor voice 2:
+
+VOICES=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices
+SMOO=/afs/inf.ed.ac.uk/group/cstr/projects/nst/cvbotinh/SCRIPT/Smoothing//
+COND=0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6
+
+python ~/proj/slm-local/snickery/script/extract_magphase_features.py -w $VOICES/nick_smooth_ts5_vs0.6/synthesis_test/$COND/ -o /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_for_anchor2 -m 60 -p 45 -fftlen 2048 -ncores 29 
+  
+
+### smooth
+
+OUT=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/nick_test_sets
+
+cd /group/project/cstr2/owatts/temp/snickery/script
+
+
+./smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_for_anchor2/low/ /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_for_anchor2/low/smoothed/ magphase 5 0.6 /group/project/cstr2/cvbotinh/SCRIPT/Nick/testlist.txt 0
+
+<!-- echo hvd_191 > /tmp/test.txt
+./smooth_features.sh /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_for_anchor2/low/ /tmp/test magphase 5 0.6 /tmp/test.txt 0
+ -->
+
+### resynth:
+
+python ~/proj/slm-local/snickery/script/resynthesise_magphase.py -f /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_for_anchor2/low/smoothed/ts5_vs0.6 -o /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_for_anchor2/low/smoothed/ts5_vs0.6/resyn  -m 60 -p 45 -fftlen 2048 -ncores 29 
+
+rm -r  /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices/nick_anchor2
+mkdir /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices/nick_anchor2
+cp  /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_for_anchor2/low/smoothed/ts5_vs0.6/resyn/*   /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices/nick_anchor2
+
+
+smoothing & snickery broke MP resynthesis in a few cases...
+
+
+
+
+## Anchor attempt 3: LP filter natural speech
+
+sox -R /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/data/nick/wav/hvd_181.wav /tmp/test.wav lowpass 7000 
+
+
+
+
+
+The set of processed signals consists of all the signals under test and at least two additional “anchor” signals. The standard anchor is a low-pass filtered version of the original signal with a cut-off frequency of 3.5 kHz; the mid quality anchor has a cut-off frequency of 7 kHz.
+The bandwidths of the anchors correspond to the Recommendations for control circuits (3.5 kHz), used for supervision and coordination purpose in broadcasting, commentary circuits (7 kHz) and occasional circuits (10 kHz), according to Recommendations ITU-T G.711, G.712, G.722 and J.21, respectively.
+The characteristics of the 3.5 kHz low-pass filter should be as follows: fc  3.5 kHz
+Maximum pass band ripple  0.1 dB
+Minimum attenuation at 4 kHz  25 dB
+Minimum attenuation at 4.5 kHz  50 dB.
+Additional anchors are intended to provide an indication of how the systems under test compare to
+well-known audio quality levels and should not be used for rescaling results between different tests.
+
+
+
+
+
+
+
+ls -d ~/sim2/oliver/hybrid_work/IS2018_exps/stimuli/experiment_1/* | while read DIREC ; do echo $DIREC ;  ls $DIREC/* | wc -l ; done
+
+
+
+
+
+### Normalise stimuli for experiments -- rest of hvd
+
+
+
+
+PATH=$PATH:~/proj/slm-local/snickery/tool/
+
+VOICES=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices
+SMOO=/afs/inf.ed.ac.uk/group/cstr/projects/nst/cvbotinh/SCRIPT/Smoothing//
+COND=0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6
+
+STIM=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/stimuli/experiment_1
+
+
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i $VOICES/nick_01/synthesis_test/$COND/ -o $STIM/S0 -p hvd
+
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i $VOICES/nick_smooth_ts5_vs0.8/synthesis_test/$COND/ -o $STIM/S1 -p hvd
+
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i  $VOICES/nick_smooth_ts5_vs0.6/synthesis_test/$COND/ -o $STIM/S2 -p hvd
+
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices/nick_anchor2 -o $STIM/A -p hvd
+
+
+OUT=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/nick_test_sets
+
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i $OUT/magphase/low/smoothed/ts5_vs0.8/resyn/ -o $STIM/M1/ -p hvd
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i $OUT/magphase/low/smoothed/ts5_vs0.6/resyn/ -o $STIM/M2/ -p hvd
+
+
+python ~/proj/slm-local/snickery/script_experiment/normalise_level.py -i /group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/world/resyn/ -o $STIM/W0/ -p hvd
+
+
+
+
+
+## make html index, include world :
+
+python ~/proj/slm-local/snickery/script/make_internal_webchart.py -o $STIM/index2.html -d $STIM/{N,W0,M0,S0,M1,S1,M2,S2,A}
+
+
+
+python ~/proj/slm-local/snickery/script/make_internal_webchart.py -o $STIM/index3.html -d $STIM/{N,W0,M0,S0,M1,S1,M2,S2,A} -p hvd_30
+
+
+
+
+
+
+
+
+#### -------- exp 2 :
+
+NW
+NV
+NVW
+
+
+TO=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/nick_vctk6_softlinks
+
+VCTK=/group/project/cstr2/cvbotinh/SCRIPT/VCTK-Corpus/feats/
+NICK=/group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/
+for SUBDIR in high low pm shift high/f0/ high/imag/ high/mag/ high/real/ low/imag/ low/lf0/ low/mag/ low/real/ ; do 
+  mkdir -p $TO/$SUBDIR/
+  cp -rs $NICK/$SUBDIR/* $TO/$SUBDIR/ ;
+  cp -rs $VCTK/p{304,334,374,298,246,292}/$SUBDIR/* $TO/$SUBDIR/ ;
+done
+
+
+
+TO=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/nick_norw_softlinks
+
+NICK=/group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/
+NORW=/group/project/cstr2/cvbotinh/SCRIPT/Norwegian/feats/sennheiser/part_1/
+for SUBDIR in high low pm shift high/f0/ high/imag/ high/mag/ high/real/ low/imag/ low/lf0/ low/mag/ low/real/ ; do 
+  mkdir -p $TO/$SUBDIR/
+  cp -rs $NICK/$SUBDIR/* $TO/$SUBDIR/ ;
+  cp -rs $NORW/$SUBDIR/* $TO/$SUBDIR/ ;
+done
+
+
+
+
+TO=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/nick_vctk6_norw_softlinks
+
+NICK=/group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/
+VCTK=/group/project/cstr2/cvbotinh/SCRIPT/VCTK-Corpus/feats/
+NORW=/group/project/cstr2/cvbotinh/SCRIPT/Norwegian/feats/sennheiser/part_1/
+for SUBDIR in high low pm shift high/f0/ high/imag/ high/mag/ high/real/ low/imag/ low/lf0/ low/mag/ low/real/ ; do 
+  mkdir -p $TO/$SUBDIR/
+  cp -rs $NICK/$SUBDIR/* $TO/$SUBDIR/ ;
+  cp -rs $NORW/$SUBDIR/* $TO/$SUBDIR/ ;
+  cp -rs $VCTK/p{304,334,374,298,246,292}/$SUBDIR/* $TO/$SUBDIR/ ;
+done
+
+
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+python ~/proj/slm-local/snickery/script/train_halfphone.py -c ~/proj/slm-local/snickery/config/IS2018_NV.cfg  
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+python ~/proj/slm-local/snickery/script/train_halfphone.py -c ~/proj/slm-local/snickery/config/IS2018_NW.cfg  
+
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+python ~/proj/slm-local/snickery/script/train_halfphone.py -c ~/proj/slm-local/snickery/config/IS2018_NVW.cfg  
+
+
+
+###
+
+
+VOICES=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices
+COND=0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6
+
+STIM=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/stimuli/experiment_1
+
+
+
+python ~/proj/slm-local/snickery/script/make_internal_webchart.py -o $STIM/index_exp2_sample.html -d \
+         $VOICES/nick_01/synthesis_test/$COND/  \
+         $VOICES/vctk01/synthesis_test/$COND/  \
+         $VOICES/nor01/synthesis_test/$COND/ \
+        $VOICES/NV/synthesis_test/$COND/ \
+        $VOICES/NW/synthesis_test/$COND/ \
+        $VOICES/NVW/synthesis_test/$COND/ -n N V W NV NW NVW
+
+
+
+
+
+#### try with Nick 200 + V W VW
+
+## nick 200:
+
+
+NICK=/group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/
+TO=/group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_200utts
+for SUBDIR in high low pm shift high/f0/ high/imag/ high/mag/ high/real/ low/imag/ low/lf0/ low/mag/ low/real/ ; do 
+  mkdir -p $TO/$SUBDIR/
+  cp -rs $NICK/$SUBDIR/herald_{0,1}??.* $TO/$SUBDIR/ ;
+done
+
+
+
+TO=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/nick200_vctk6_softlinks
+
+VCTK=/group/project/cstr2/cvbotinh/SCRIPT/VCTK-Corpus/feats/
+NICK=/group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_200utts
+for SUBDIR in high low pm shift high/f0/ high/imag/ high/mag/ high/real/ low/imag/ low/lf0/ low/mag/ low/real/ ; do 
+  mkdir -p $TO/$SUBDIR/
+  cp -rs $NICK/$SUBDIR/* $TO/$SUBDIR/ ;
+  cp -rs $VCTK/p{304,334,374,298,246,292}/$SUBDIR/* $TO/$SUBDIR/ ;
+done
+
+
+
+TO=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/nick200_norw_softlinks
+
+NICK=/group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_200utts
+NORW=/group/project/cstr2/cvbotinh/SCRIPT/Norwegian/feats/sennheiser/part_1/
+for SUBDIR in high low pm shift high/f0/ high/imag/ high/mag/ high/real/ low/imag/ low/lf0/ low/mag/ low/real/ ; do 
+  mkdir -p $TO/$SUBDIR/
+  cp -rs $NICK/$SUBDIR/* $TO/$SUBDIR/ ;
+  cp -rs $NORW/$SUBDIR/* $TO/$SUBDIR/ ;
+done
+
+
+
+
+TO=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/data/nick200_vctk6_norw_softlinks
+
+NICK=/group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_200utts
+VCTK=/group/project/cstr2/cvbotinh/SCRIPT/VCTK-Corpus/feats/
+NORW=/group/project/cstr2/cvbotinh/SCRIPT/Norwegian/feats/sennheiser/part_1/
+for SUBDIR in high low pm shift high/f0/ high/imag/ high/mag/ high/real/ low/imag/ low/lf0/ low/mag/ low/real/ ; do 
+  mkdir -p $TO/$SUBDIR/
+  cp -rs $NICK/$SUBDIR/* $TO/$SUBDIR/ ;
+  cp -rs $NORW/$SUBDIR/* $TO/$SUBDIR/ ;
+  cp -rs $VCTK/p{304,334,374,298,246,292}/$SUBDIR/* $TO/$SUBDIR/ ;
+done
+
+
+
+
+cp ~/proj/slm-local/snickery/config/IS2018_NV.cfg  ~/proj/slm-local/snickery/config/IS2018_N200.cfg
+cp ~/proj/slm-local/snickery/config/IS2018_NV.cfg  ~/proj/slm-local/snickery/config/IS2018_NV200.cfg  
+cp ~/proj/slm-local/snickery/config/IS2018_NW.cfg  ~/proj/slm-local/snickery/config/IS2018_NW200.cfg  
+cp ~/proj/slm-local/snickery/config/IS2018_NVW.cfg  ~/proj/slm-local/snickery/config/IS2018_NVW200.cfg  
+
+
+
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+python ~/proj/slm-local/snickery/script/train_halfphone.py -c ~/proj/slm-local/snickery/config/IS2018_N200.cfg  
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+python ~/proj/slm-local/snickery/script/train_halfphone.py -c ~/proj/slm-local/snickery/config/IS2018_NV200.cfg  
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+python ~/proj/slm-local/snickery/script/train_halfphone.py -c ~/proj/slm-local/snickery/config/IS2018_NW200.cfg  
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+python ~/proj/slm-local/snickery/script/train_halfphone.py -c ~/proj/slm-local/snickery/config/IS2018_NVW200.cfg  
+
+## last exhasted disk -- try again and stre to cstr2
+mkdir -p /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices/NVW200/synthesis_test/0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6/
+
+cp -r ~/pr/owatts/IS2018_hybrid/NVW200/synthesis_test/0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6/* /afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices/NVW200/synthesis_test/0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6/
+
+
+
+VOICES=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/voices
+COND=0_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6
+STIM=/afs/inf.ed.ac.uk/group/cstr/projects/simple4all_2/oliver/hybrid_work/IS2018_exps/stimuli/experiment_1
+#
+python ~/proj/slm-local/snickery/script/make_internal_webchart.py -o $STIM/index_exp2B_sample.html -d \
+         $VOICES/nick_01/synthesis_test/$COND/  \
+         $VOICES/vctk01/synthesis_test/$COND/  \
+         $VOICES/nor01/synthesis_test/$COND/ \
+        $VOICES/NV/synthesis_test/$COND/ \
+        $VOICES/NW/synthesis_test/$COND/ \
+        $VOICES/NVW/synthesis_test/$COND/   \
+        $VOICES/N200/synthesis_test/$COND/ \
+        $VOICES/NV200/synthesis_test/$COND/ \
+        $VOICES/NW200/synthesis_test/$COND/ \
+        $VOICES/NVW200/synthesis_test/$COND/ \
+        $VOICES/N100/synthesis_test/$COND/ \
+           -n N V W NV NW NVW N200 NV200 NW200 NVW200 N100
+
+
+
+
+
+
+
+
+
+#### try with Nick 100 + V W VW
+
+## nick 100:
+
+
+NICK=/group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase/
+TO=/group/project/cstr2/cvbotinh/SCRIPT/Nick/feats/magphase_100utts
+for SUBDIR in high low pm shift high/f0/ high/imag/ high/mag/ high/real/ low/imag/ low/lf0/ low/mag/ low/real/ ; do 
+  mkdir -p $TO/$SUBDIR/
+  cp -rs $NICK/$SUBDIR/herald_0??.* $TO/$SUBDIR/ ;
+done
+
+
+cp ~/proj/slm-local/snickery/config/IS2018_N200.cfg ~/proj/slm-local/snickery/config/IS2018_N100.cfg
+
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+python ~/proj/slm-local/snickery/script/train_halfphone.py -c ~/proj/slm-local/snickery/config/IS2018_N100.cfg  
+

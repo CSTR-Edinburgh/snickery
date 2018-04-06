@@ -1,6 +1,6 @@
 
 import numpy as np
-import pylab
+# import pylab
 def make_filter_01(dilation_factor, noutputs, verbose=False):
 
     ## first pass to determine length of filtered region:

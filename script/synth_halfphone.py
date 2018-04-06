@@ -38,7 +38,7 @@ import StashableKDTree
 
 from sklearn.cluster import KMeans
 
-from util import safe_makedir, vector_to_string, basename
+from util import safe_makedir, vector_to_string, basename, writelist
 from speech_manip import read_wave, write_wave, weight, get_speech
 from label_manip import break_quinphone, extract_monophone
 from train_halfphone import get_data_dump_name, compose_speech, standardise, destandardise, \
@@ -1641,8 +1641,13 @@ def get_facts(vals):
             jscores = self.get_join_scores_per_stream(best_path)
             return (tscores, jscores)
 
-        if self.config['get_selection_info'] and self.config['target_representation'] != 'epoch':
-            self.get_path_information(target_features, best_path)
+        if self.config['get_selection_info']:
+            if self.config['target_representation'] == 'epoch':
+                trace_lines = self.get_path_information_epoch(target_features, best_path)
+                writelist(trace_lines, outstem + '.trace.txt')
+                print 'Wrote trace file %s'%(outstem + '.trace.txt')
+            else:
+                self.get_path_information(target_features, best_path)
 
 
 
@@ -2084,6 +2089,104 @@ def get_facts(vals):
 
 
         plt.show()        
+
+
+
+
+    def get_path_information_epoch(self, target_features, best_path):
+        '''
+        Store information about what was selected, where the joins are, what the costs
+        were, etc. etc. to file
+        '''
+        data = []
+        multiepoch = self.config.get('multiepoch', 1)
+        for index in best_path:
+            start_index = self.unit_index_within_sentence[index]
+            end_index = start_index + multiepoch
+            data.append( '%s %s %s'%(self.train_filenames[index], start_index, end_index) )
+        return data
+
+
+
+
+        '''
+        print '============'
+        print 'Display some information about the chosen path -- turn this off with config setting get_selection_info'
+        print 
+        output = []
+        for (a,b) in zip(best_path[:-1], best_path[1:]):                
+            output.append(extract_monophone(self.train_unit_names[a]))
+            if b != a+1:
+                output.append('|')
+        output.append(extract_monophone(self.train_unit_names[best_path[-1]]))
+        print ' '.join(output)
+        print
+        n_joins = output.count('|')
+        percent_joins = (float(n_joins) / (len(best_path)-1)) * 100
+        print '%.1f%% of junctures (%s) are joins'%(percent_joins, n_joins)
+
+
+        print 
+        print ' --- Version with unit indexes ---'
+        print 
+        for (a,b) in zip(best_path[:-1], best_path[1:]):
+            output.append( extract_monophone(self.train_unit_names[a]) + '-' + str(a))
+            if b != a+1:
+                output.append('|')
+
+        output.append('\n\n\n')
+        output.append(extract_monophone(self.train_unit_names[best_path[-1]]) + '-' + str(best_path[-1]))
+        print ' '.join(output)            
+
+        # print
+        # print 'target scores'
+        
+        stream_errors_target =  self.get_target_scores_per_stream(target_features, best_path)
+
+        # print stream_errors_target
+
+        # print dists
+        #mean_dists = np.mean(dists)
+        #std_dists = np.std(dists)
+        # print dists
+        # print (mean_dists, std_dists)
+
+        # print 
+        # print 'join scores'
+
+        stream_errors_join = self.get_join_scores_per_stream(best_path)
+
+        # print stream_errors_join
+
+
+        #### TODO: remove zeros from stream contrib scores below
+        print 
+        print '------------- join and target cost summaries by stream -----------'
+        print
+
+        ## take nonzeros only, but avoid division errors:
+        # stream_errors_join = stream_errors_join[stream_errors_join>0.0]
+        # if stream_errors_join.size == 0:
+        #     stream_errors_join = np.zeros(stream_errors_join.shape) ## avoid divis by 0
+        # stream_errors_target = stream_errors_target[stream_errors_target>0.0]
+        # if stream_errors_target.size == 0:
+        #     stream_errors_target = np.zeros(stream_errors_target.shape) ## avoid divis by 0
+
+        for (stream, mu, sig) in zip (self.stream_list_join,
+            np.mean(stream_errors_join, axis=0),
+            np.std(stream_errors_join, axis=0) ):
+            print 'join   %s -- mean: %s   std:  %s'%(stream.ljust(10), str(mu).ljust(15), str(sig).ljust(1))
+        print 
+        for (stream, mu, sig) in zip (self.stream_list_target,
+            np.mean(stream_errors_target, axis=0),
+            np.std(stream_errors_target, axis=0) ):
+            print 'target %s -- mean: %s   std:  %s'%(stream.ljust(10), str(mu).ljust(15), str(sig).ljust(1))
+        print 
+        print '--------------------------------------------------------------------'
+        '''
+
+
+
 
 
     def inspect_join_weights_on_utt(self, fname):
