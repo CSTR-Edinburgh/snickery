@@ -1354,3 +1354,207 @@ cp ~/proj/slm-local/snickery/config/IS2018_N200.cfg ~/proj/slm-local/snickery/co
 source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
 python ~/proj/slm-local/snickery/script/train_halfphone.py -c ~/proj/slm-local/snickery/config/IS2018_N100.cfg  
 
+
+
+# After Interspeech 2018 submission
+
+Code used for IS2018 exps in this commit:
+
+```
+git commit -m 'IS2018 experiment code state'
+git tag -a IS2018 -m "version used for IS2018 exps"
+```
+
+
+100 utt voice with original scripts:
+
+```
+[salton]owatts: pwd
+/afs/inf.ed.ac.uk/user/o/owatts/proj/slm-local/snickery
+
+source ~/sim2/oliver/tool/virtual_python/hybrid_synthesiser/bin/activate
+
+python ./script/train_halfphone.py -c ./config/simplified_test_01.cfg
+
+Stored training data for 100 sentences to /group/project/cstr2/owatts/temp/snickery_test_01/data_dumps/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch.hdf5
+
+python ./script/synth_halfphone.py -c ./config/simplified_test_01.cfg
+```
+
+Checksums of outputs:
+```
+
+md5sum  /group/project/cstr2/owatts/temp/snickery_test_01/data_dumps/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch.hdf5
+md5sum  /group/project/cstr2/owatts/temp/snickery_test_01/synthesis_test/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6/hvd_181.wav
+```
+5177f4b5df3a0d939bbc23c68cf3e83d
+c792d90af2753e8e289afa6d12d32c62
+
+First test, can we simply config only?
+
+python ./script/train_halfphone.py -c ./config/simplified_test_02.cfg
+
+
+
+
+md5sum  /group/project/cstr2/owatts/temp/snickery_test_02/data_dumps/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch.hdf5
+md5sum  /group/project/cstr2/owatts/temp/snickery_test_02/synthesis_test/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6/hvd_181.wav
+
+a5dbf0c7f6cebdb50ad142ac783b0c36
+c792d90af2753e8e289afa6d12d32c62
+
+
+
+Dbases diff sizes:
+
+(hybrid_synthesiser)[salton]owatts: du /group/project/cstr2/owatts/temp/snickery_test_0*/data_dumps/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch.hdf5
+75460   /group/project/cstr2/owatts/temp/snickery_test_01/data_dumps/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch.hdf5
+75456   /group/project/cstr2/owatts/temp/snickery_test_02/data_dumps/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch.hdf5
+
+
+
+Contents seem identical:
+
+Loading hybrid voice data:
+<HDF5 dataset "cutpoints": shape (47666, 3), type "<i4">
+<HDF5 dataset "filenames": shape (47666,), type "|S50">
+<HDF5 dataset "join_contexts": shape (47667, 302), type "<f4">
+<HDF5 dataset "mean_join": shape (151,), type "<f4">
+<HDF5 dataset "mean_target": shape (61,), type "<f4">
+<HDF5 dataset "std_join": shape (1, 151), type "<f4">
+<HDF5 dataset "std_target": shape (1, 61), type "<f4">
+<HDF5 dataset "train_unit_features": shape (47666, 61), type "<f4">
+<HDF5 dataset "train_unit_names": shape (47666,), type "|S50">
+<HDF5 dataset "unit_index_within_sentence_dset": shape (47666,), type "<i4">
+
+
+    Database file: /group/project/cstr2/owatts/temp/snickery_test_01/data_dumps/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch.hdf5
+
+Loading hybrid voice data:
+<HDF5 dataset "cutpoints": shape (47666, 3), type "<i4">
+<HDF5 dataset "filenames": shape (47666,), type "|S50">
+<HDF5 dataset "join_contexts": shape (47667, 302), type "<f4">
+<HDF5 dataset "mean_join": shape (151,), type "<f4">
+<HDF5 dataset "mean_target": shape (61,), type "<f4">
+<HDF5 dataset "std_join": shape (1, 151), type "<f4">
+<HDF5 dataset "std_target": shape (1, 61), type "<f4">
+<HDF5 dataset "train_unit_features": shape (47666, 61), type "<f4">
+<HDF5 dataset "train_unit_names": shape (47666,), type "|S50">
+<HDF5 dataset "unit_index_within_sentence_dset": shape (47666,), type "<i4">
+
+
+
+    5d9b5463b3de9b37e77338dd180a05c6  /group/project/cstr2/owatts/temp/snickery_test_01/data_dumps/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch.hdf5
+
+Now same size, but checksum changes each time -- see:
+
+https://stackoverflow.com/questions/16019656/hdf5-file-h5py-with-version-control-hash-changes-on-every-save
+
+OK, disabled track_times when creating datasets
+
+71e87436c0f7840b5ddc73fdbc1198fd
+71e87436c0f7840b5ddc73fdbc1198fd
+71e87436c0f7840b5ddc73fdbc1198fd
+
+------
+
+simplify scripts AND config further to cover only IS2018 cases:
+
+ python ./script/train_simple.py -c ./config/simplified_test_03.cfg
+
+ 95b8a705816ddaec45152093d334adcf
+
+
+ python ./script/synth_simple.py -c ./config/simplified_test_03.cfg
+
+
+
+ md5sum /group/project/cstr2/owatts/temp/snickery_test_0*/synthesis_test/100_utts_jstreams-mag-real-imag-lf0_tstreams-mag-lf0_rep-epoch/greedy-yes_target-0.5-0.5_join-0.25-0.25-0.25-0.25_scale-0.2_presel-acoustic_jmetric-natural2_cand-30_taper-50multiepoch-6/hvd_182.wav | awk '{print $1}'
+
+
+
+
+ ======= notes on simplification ========
+
+ still to do:
+    -- get local test data
+    -- add hdf5 conversion part
+    -- blizzard also (& resampling code...)
+
+
+
+hardcoded:
+
+ -- use mp resynt (no pm/cutpoints etc)
+ -- always epoch
+ -- always standardis all streams
+ -- nver labels
+
+TODO
+
+get_data_dump_name
+cutpoints_dset
+
+felipe's pm reader?
+
+
+
+## Get representations for target cost:-
+unit_features = t_speech[1:-1, 
+
+### left this in for now, tunnred off
+ADD_PHONETIC_EPOCH
+
+
+
+put train functions in:
+
+script/data_manipulation.py
+script/data_fudging.py
+script/file_naming.py
+
+
+TODO -- refacgtor train_halfphone to use these too
+
+
+
+
+synth: --
+
+only support mode_of_operation == 'normal'
+
+
+noation:
+
+!TODO
+#!
+
+
+hold_waves_in_memory
+preload_all_magphase_utts
+
+
+
+
+assume always want to:
+
+weight_target_data
+weight_join_data
+
+
+
+527:  self.unit_end_data = join_contexts_weighted[1:,:]
+
+
+
+make_synthesis_condition_name in file_naming
+random_subset_data in data_manipulation
+
+zero_pad_matrix in matrix_operations
+taper_matrix in matrix_operations
+
+        
+
+put some cuts here:
+
+subl script/synth_simple_cuts.py    
