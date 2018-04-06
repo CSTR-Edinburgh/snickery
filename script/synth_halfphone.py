@@ -395,12 +395,12 @@ class Synthesiser(object):
 
 
         self.test_data_target_dirs = locate_stream_directories(self.config['test_data_dirs'], self.stream_list_target)
-        self.tune_data_target_dirs = locate_stream_directories(self.config['tune_data_dirs'], self.stream_list_target)
+
         print 'Found target directories: %s'%(self.test_data_target_dirs)
         print 
         print 
-        
-
+        if self.config.get('tune_data_dirs', ''):
+            self.tune_data_target_dirs = locate_stream_directories(self.config['tune_data_dirs'], self.stream_list_target)
 
     def reconfigure_settings(self, changed_config_values):
         '''
@@ -1012,9 +1012,9 @@ def get_facts(vals):
         else:
             join_weights = '-'.join([str(val) for val in self.config['join_stream_weights']])
             jcw = self.config['join_cost_weight']
-            jct = self.config['join_cost_type']
-            nc = self.config['n_candidates']
-            tl = self.config['taper_length']
+            jct = self.config.get('join_cost_type', 'natural2')  ## TODO: not relevant to epoch, provided default consistent with IS2018 exp
+            nc = self.config.get('n_candidates', 30) ## TODO: not relevant to epoch, provided default consistent with IS2018 exp
+            tl = self.config.get('taper_length', 50) ## TODO: not relevant to epoch, provided default consistent with IS2018 exp
             name = '%s%starget-%s_join-%s_scale-%s_presel-%s_jmetric-%s_cand-%s_taper-%s'%(
                         greedy, smooth,
                         target_weights, join_weights, jcw,
@@ -1456,10 +1456,10 @@ def get_facts(vals):
 
         if synth_type == 'test':
             data_dirs = self.test_data_target_dirs
-            lab_dir = self.config['test_lab_dir']
+            lab_dir = self.config.get('test_lab_dir', '') ## default added for pure acoustic epoch case
         elif synth_type == 'tune':
             data_dirs = self.tune_data_target_dirs
-            lab_dir = self.config['tune_lab_dir']            
+            lab_dir = self.config.get('tune_lab_dir', '') ## default added for pure acoustic epoch case
         else:
             sys.exit('Unknown synth_type  9489384')
 
