@@ -29,8 +29,9 @@ import speech_manip
 from util import safe_makedir, basename, writelist   
 from speech_manip import read_wave, write_wave, weight, get_speech
 from file_naming import get_data_dump_name, make_train_condition_name, make_synthesis_condition_name
-from data_manipulation import locate_stream_directories, compose_speech, standardise, random_subset_data # , get_mean_std, 
+from data_manipulation import locate_stream_directories, compose_speech, standardise, random_subset_data
 from matrix_operations import zero_pad_matrix, taper_matrix
+from resample import pitch_synchronise
 
 from segmentaxis import segment_axis
 
@@ -291,11 +292,11 @@ class Synthesiser(object):
 
         if set_name == 'test':
             data_dirs = self.test_data_target_dirs[first_stream]
-            name_patterns = self.config['test_patterns']
+            name_patterns = self.config.get('test_patterns', [])
             limit = self.config['n_test_utts']
         elif set_name == 'tune':
             data_dirs = self.tune_data_target_dirs[first_stream]
-            name_patterns = self.config['tune_patterns']
+            name_patterns = self.config.get('tune_patterns', [])
             limit = self.config['n_tune_utts']            
         else:
             sys.exit('Set name unknown: "%s"'%(set_name))
@@ -305,14 +306,15 @@ class Synthesiser(object):
 
         ## find all files containing one of the patterns in test_patterns
         L = len(flist)
-        selected_flist = []
-        for (i,fname) in enumerate(flist):
-            for pattern in name_patterns:
-                if pattern in fname:
-                    if fname not in selected_flist:
-                        selected_flist.append(fname)
-                    
-        flist = selected_flist 
+        if name_patterns:
+            selected_flist = []
+            for (i,fname) in enumerate(flist):
+                for pattern in name_patterns:
+                    if pattern in fname:
+                        if fname not in selected_flist:
+                            selected_flist.append(fname)
+                        
+            flist = selected_flist 
 
         ## check sentences not in training:
         if 1:
@@ -370,6 +372,11 @@ class Synthesiser(object):
         unnorm_speech = compose_speech(data_dirs, base, self.stream_list_target, \
                                 self.config['datadims_target']) 
 
+        if self.config.get('pitch_synchronise_test_data', False):
+            unnorm_speech = pitch_synchronise(unnorm_speech, self.stream_list_target, \
+                                self.config['datadims_target'])
+            #unnorm_speech = unnorm_speech_b
+
         m,dim = unnorm_speech.shape
 
         speech = standardise(unnorm_speech, self.mean_vec_target, self.std_vec_target)         
@@ -412,7 +419,7 @@ class Synthesiser(object):
             
             if self.config.get('store_full_magphase_sep_files', False):
                 assert self.config['target_representation'] == 'epoch'
-                target_fz = unnorm_speech[:,-1]
+                target_fz = unnorm_speech[:,-1]  ## TODO: unhardcode position and lf0!
                 target_fz = np.exp(target_fz)
                 magphase_overlap = self.config.get('magphase_overlap', 0)
 
