@@ -8,29 +8,13 @@ import sys, os
 from string import strip
 from argparse import ArgumentParser
 
-def main_work():
+def main_work(voice_dirs, names=[], pattern='', outfile=''):
 
-
-    #################################################
-      
-    # ======== Get stuff from command line ==========
-
-    a = ArgumentParser()
-    a.add_argument('-o', dest='outfile', default='', type=str, \
-                    help= "If not given, print to console")
-    a.add_argument('-d', nargs='+', required=True, help='list of directories with samples')
-    a.add_argument('-n', nargs='+', required=False, help='list of names -- use directory names if not given')
-    a.add_argument('-p', dest='pattern', default='', type=str)
-    opts = a.parse_args()
-    
-
-    # ===============================================
-    
-    voice_dirs = opts.d
+    #voice_dirs = opts.d
     voice_dirs = [string for string in voice_dirs if os.path.isdir(string)]
 
-    if opts.n:
-        names = opts.n
+    if names:
+        #names = opts.n
         if not len(names) == len(voice_dirs):
             print '------'
             for name in names:
@@ -65,8 +49,8 @@ def main_work():
                 uttnames.append(unique_utt)
 
 
-    if opts.pattern:
-        uttnames = [name for name in uttnames if opts.pattern in name]
+    if pattern:
+        uttnames = [name for name in uttnames if pattern in name]
 
     # for voice_dir in voice_dirs:
     #     for uttname in os.listdir(voice_dir):
@@ -109,8 +93,8 @@ def main_work():
     output += '<p>&nbsp;</p>\n'
 
 
-    if opts.outfile:
-        f = open(opts.outfile, 'w')
+    if outfile:
+        f = open(outfile, 'w')
         f.write(output)
         f.close()
     else:
@@ -127,7 +111,22 @@ def get_audio_control(fname):
 
 if __name__=="__main__": 
 
-        main_work()
+    #################################################
+      
+    # ======== Get stuff from command line ==========
+
+    a = ArgumentParser()
+    a.add_argument('-o', dest='outfile', default='', type=str, \
+                    help= "If not given, print to console")
+    a.add_argument('-d', nargs='+', required=True, help='list of directories with samples')
+    a.add_argument('-n', nargs='+', required=False, help='list of names -- use directory names if not given')
+    a.add_argument('-p', dest='pattern', default='', type=str)
+    opts = a.parse_args()
+    
+
+    # ===============================================
+
+    main_work(opts.d, opts.n, opts.pattern, opts.outfile)
 
 
 
