@@ -66,12 +66,13 @@ def main_work(config, overwrite_existing_data=False):
         print 'Selected %s utts with pattern %s'%(len(flist), match_expression)
         
     ## Also filter for test material, in case they are in same directory:
-    test_flist = []
-    for fname in flist:
-        for pattern in config['test_patterns']:
-            if pattern in fname:
-                test_flist.append(fname)
-    flist = [name for name in flist if name not in test_flist]
+    if 'test_patterns' in config:
+        test_flist = []
+        for fname in flist:
+            for pattern in config['test_patterns']:
+                if pattern in fname:
+                    test_flist.append(fname)
+        flist = [name for name in flist if name not in test_flist]
 
     ## Finally, only take utterances which occur in train_list, if it is given in config:
     if 'train_list' in config:
@@ -224,9 +225,13 @@ def main_work(config, overwrite_existing_data=False):
             labfile = os.path.join(config['label_datadir'], base + '.' + config['lab_extension'])
             labs = read_label(labfile, config['quinphone_regex'])
             unit_names = resample_labels.pitch_synchronous_resample_label(48000, 0.005, pms_samples, labs)
-            unit_names = unit_names[1:-1]
         else:                
-            unit_names = np.array(['_']*(t_speech.shape[0]-2))
+            unit_names = ['_']*(t_speech.shape[0])
+            unit_names = np.array(unit_names)
+        #
+        #
+        if config.get('REPLICATE_IS2018_EXP', False):
+            unit_names = unit_names[1:-1]
 
 
         m,n = unit_features.shape   
