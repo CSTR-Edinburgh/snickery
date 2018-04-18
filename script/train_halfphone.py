@@ -63,6 +63,7 @@ def locate_stream_directories(directories, streams):
 def main_work(config, overwrite_existing_data=False):
     
     ## (temporary) assertions:-
+    config['standardise_target_data'] = True
     assert config['standardise_target_data'] == True
     
     config['joincost_features'] = True    ## want to use self. here, but no class defined...
@@ -337,7 +338,7 @@ def main_work(config, overwrite_existing_data=False):
             print j_speech.shape
             if j_speech.size == 1:  ## bad return value  
                 continue 
-            if config['standardise_join_data']:
+            if config.get('standardise_join_data', True):
                 j_speech = standardise(j_speech, mean_vec_join, std_vec_join) 
                   
 
