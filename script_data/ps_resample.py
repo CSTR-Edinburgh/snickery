@@ -44,15 +44,11 @@ def main_work():
     a.add_argument('-x', dest='feature_extension', required=True)
     a.add_argument('-d', dest='feature_dim', type=int, required=True)
     a.add_argument('-s', dest='fshift_seconds', type=float, default=0.005, required=False)
-    a.add_argument('-l', dest='labdir', default=None, help='not currently used')    
+    a.add_argument('-l', dest='labdir', default=None, help='not currently used')   
+    a.add_argument('-win', dest='windowing_convention', default='', help='How to determine locations of windows, by default, guessed based on feature_extension')        
     opts = a.parse_args()
     
     # ===============================================
-    
-    # for filetype in ['f0','mgc','ap']:
-    #     direc = os.path.join(opts.outdir, filetype)
-    #     if not os.path.isdir(direc):
-    #         os.makedirs(direc)
 
     ## temporary check not to use labels:
     assert opts.labdir == None
@@ -64,10 +60,6 @@ def main_work():
     base = base.replace('.wav', '')
 
     pm_fname = os.path.join(opts.pm_dir, base + '.pm')
-
-    # mgc_fname = os.path.join(opts.feature_dir, 'mgc', base + '.mgc')
-    # ap_fname = os.path.join(opts.feature_dir, 'ap', base + '.ap')
-    # f0_fname = os.path.join(opts.feature_dir, 'f0', base + '.f0')
     
     feature_fname = os.path.join(opts.feature_dir, base + '.' + opts.feature_extension)
 
@@ -78,10 +70,6 @@ def main_work():
     ## read data from files
     wave, sample_rate = read_wave(opts.wavfile)
 
-    # mgc = get_speech(mgc_fname, MGCDIM)
-    # ap = get_speech(ap_fname, get_world_bap_dim(sample_rate))
-    # fz = get_speech(f0_fname, 1)
-
     if opts.feature_extension=='mfcc':
         features = get_speech(feature_fname, opts.feature_dim, remove_htk_header=True)
     else:
@@ -89,23 +77,20 @@ def main_work():
 
     pms_seconds = read_pm(pm_fname)
     
-    #print get_world_bap_dim(sample_rate)
-    
-    # if not (mgc.shape[0] == ap.shape[0] == fz.shape[0]):
-    #     print mgc.shape[0] , ap.shape[0] , fz.shape[0]
-    #     sys.exit('dims do not match')
-    
     ## Convert seconds -> waveform sample numbers:-
     pms = np.asarray(np.round(pms_seconds * sample_rate), dtype=int)
     len_wave = len(wave)
-            
-    if opts.feature_extension == 'mfcc':
-        windowing_convention='HTK'
-    elif opts.feature_extension in ['formfreq', 'formband']:
-        windowing_convention='snack'
+    
+    if opts.windowing_convention:
+        windowing_convention = opts.windowing_convention
     else:
-        windowing_convention='world'
-
+        if opts.feature_extension == 'mfcc':
+            windowing_convention='HTK'
+        elif opts.feature_extension in ['formfreq', 'formband']:
+            windowing_convention='snack'
+        else:
+            windowing_convention='world'
+    
     if opts.feature_extension in vuv_stream_names: 
         ## then we need to handle voicing decision specially:
         features, vuv = interp_fzero(features)
@@ -224,7 +209,7 @@ def get_mfcc_frame_centres(wavlength, sample_rate, fshift_seconds, flength_secon
 
 
 def get_straight_frame_centres(wavlength, sample_rate, fshift_seconds):
-    ## !!!! This is hacked  from the world version -- not checked !!!!!!
+    ## !!!! This is hacked from the world version -- not checked !!!!!!
     samples_per_frame = int(sample_rate * fshift_seconds)
     f0_length = (wavlength / float(sample_rate) / fshift_seconds) + 1
     time_axis = []
@@ -250,6 +235,8 @@ def pitch_synchronous_resample_one_coef_at_a_time(len_wave, sample_rate, fshift_
         frame_centres = get_snack_frame_centres(len_wave, sample_rate, fshift_seconds)          
     elif windowing_convention == 'HTK':
         frame_centres = get_mfcc_frame_centres(len_wave, sample_rate, fshift_seconds, analysis_window_length_seconds)
+    if windowing_convention == 'straight':
+        frame_centres = get_straight_frame_centres(len_wave, sample_rate, fshift_seconds)        
     else:
         sys.exit('Unknown value for windowing_convention: %s'%(windowing_convention))
 
