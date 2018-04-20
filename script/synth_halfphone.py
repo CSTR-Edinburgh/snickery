@@ -43,7 +43,7 @@ from speech_manip import read_wave, write_wave, weight, get_speech
 from label_manip import break_quinphone, extract_monophone
 from train_halfphone import get_data_dump_name, compose_speech, standardise, destandardise, \
         read_label, get_halfphone_stats, reinsert_terminal_silence, make_train_condition_name, \
-        locate_stream_directories
+        locate_stream_directories, get_prosody_targets
 
 DODEBUG=False ## print debug information?
 
@@ -1539,6 +1539,17 @@ def get_facts(vals):
 
         self.stop_clock(start_time)
 
+
+
+        if self.config.get('impose_prosody_targets', False):
+            assert self.stream_list_target[0] == 'mgc'
+            assert self.stream_list_target[-1] == 'lf0'
+            if self.config.get('untrim_silence_target_speech', False): ## also apply this to unnorm version
+                unnorm_speech = reinsert_terminal_silence(unnorm_speech, labs)
+            prosody_targets = get_prosody_targets(unnorm_speech, unit_timings, ene_dim=0, lf0_dim=-1)
+            prosody_target_confidences = [self.config.get('impose_target_prosody_factor', 1.0)]  * len(prosody_targets)
+
+
         if self.config.get('debug_with_adjacent_frames', False):
             print 'Concatenate naturally contiguous units to debug concatenation!'
             assert not self.config.get('magphase_use_target_f0', True), 'set magphase_use_target_f0 to False for using debug_with_adjacent_frames'
@@ -1623,7 +1634,12 @@ def get_facts(vals):
             else:
                 if self.config.get('synth_smooth', False) and not (self.config['target_representation'] == 'epoch'):
                     print "Smooth output"
-                    self.concatenateMagPhase(best_path, outstem + '.wav')
+                    if prosody_targets:
+                        print 'impose prosody targets'
+                        self.concatenateMagPhase(best_path, outstem + '.wav', prosody_targets=prosody_targets, prosody_target_confidences=prosody_target_confidences)
+                    else:
+                        print 'no prosody targets to match'
+                        self.concatenateMagPhase(best_path, outstem + '.wav') 
                 else:
                     print "Does not smooth output"
                     self.concatenate(best_path, outstem + '.wav')

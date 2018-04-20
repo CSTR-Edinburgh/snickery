@@ -1035,6 +1035,29 @@ def get_halfphone_stats(speech, labels, representation_type='twopoint'):
 
 
 
+def get_prosody_targets(speech, timings, ene_dim=0, lf0_dim=-1, fshift_sec=0.005):
+    '''
+    Return list of triplets, containing (dur,ene,lf0) where these are averages over
+    the halfphone. If all speech in the halfphone is unvoiced, return negative lf0
+    value, else the mean of the voiced frames.
+    '''
+    prosody_targets = []
+    for (start, end) in timings:
+        energy = speech[start:end, ene_dim].mean()
+
+        pitch = speech[start:end, lf0_dim]
+        voiced = pitch[pitch>0.0]
+        if voiced.size==0:
+            pitch = -1000.0
+        else:
+            pitch = voiced.mean()
+
+        duration = (end - start) * fshift_sec
+        duration = duration * 1000.0  ## to msec
+        
+        prosody_targets.append((duration, energy, pitch))
+    return prosody_targets
+
 
 def get_contexts_for_pitch_synchronous_joincost(speech, pm_indices):
     '''
