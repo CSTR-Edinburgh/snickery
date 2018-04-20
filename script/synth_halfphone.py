@@ -14,9 +14,9 @@ import random
 from argparse import ArgumentParser
 
 # Cassia added
-# import smoothing.fft_feats as ff
-# import smoothing.libwavgen as lwg
-#import smoothing.libaudio as la
+import smoothing.fft_feats as ff
+import smoothing.libwavgen as lwg
+import smoothing.libaudio as la
 
 
 # modify import path to obtain modules from the tools/magphase/src directory:
@@ -1489,7 +1489,7 @@ def get_facts(vals):
 
         m,dim = unnorm_speech.shape
 
-        if (self.config['standardise_target_data'], True):                                
+        if self.config.get('standardise_target_data', True):                                
             speech = standardise(unnorm_speech, self.mean_vec_target, self.std_vec_target)         
         else:
             speech = unnorm_speech
@@ -1502,6 +1502,7 @@ def get_facts(vals):
             unit_features = speech[1:-1, :]  ### TODO??
         else:
             labfile = os.path.join(lab_dir, base + '.' + self.config['lab_extension'])
+            print 'reading %s'%(labfile)
             labs = read_label(labfile, self.quinphone_regex)
 
             if self.config.get('untrim_silence_target_speech', False):
@@ -2731,7 +2732,21 @@ def get_facts(vals):
         return wave 
 
 
-    def concatenateMagPhase(self,path,fname):
+    def concatenateMagPhase(self,path,fname,prosody_targets=[],prosody_target_confidences=[]):
+
+        '''
+        prosody_targets: list like: [(dur,ene,f0),(dur,ene,f0),...]  
+           where dur = predicted dur in msec for halfphone
+           ene = mean of predicted straight c0 for half phone
+           f0 = mean of predicted lf0 for half phone (neg for segments where all frames unvoiced )
+
+        prosody_target_confidences: 1.0 means impose target completely, 0.0 not at all, 
+                  inbetween -- linearly interpoalate?
+        '''
+        if prosody_targets:
+            if not prosody_target_confidences:
+                prosody_target_confidences = [1.0] * len(prosody_targets)
+            assert len(prosody_targets) == len(prosody_target_confidences) == len(path)
 
         fs     = 48000 # in Hz
         nfft   = 4096
@@ -2744,7 +2759,17 @@ def get_facts(vals):
         frags['srcfile'] = []
         frags['src_strt_sec'] = []
         frags['src_end_sec'] = []
+
+        '''
+        for (index, pros_target) in zip(path, prosody_targets):
+            target_dur = pros_target[0]
+
+        for (i,index) in enumerate(path):
+            target_dur = prosody_targets[i][0]
+        '''
+
         for index in path:
+
             (start,end) = self.train_cutpoints[index]
             frags['srcfile'].append(self.train_filenames[index])
             frags['src_strt_sec'].append(start / float(fs))
