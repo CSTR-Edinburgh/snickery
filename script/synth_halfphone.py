@@ -1548,7 +1548,8 @@ def get_facts(vals):
                 unnorm_speech = reinsert_terminal_silence(unnorm_speech, labs)
             prosody_targets = get_prosody_targets(unnorm_speech, unit_timings, ene_dim=0, lf0_dim=-1)
             prosody_target_confidences = [self.config.get('impose_target_prosody_factor', 1.0)]  * len(prosody_targets)
-
+        else:
+            prosody_targets = False
 
         if self.config.get('debug_with_adjacent_frames', False):
             print 'Concatenate naturally contiguous units to debug concatenation!'
@@ -2759,6 +2760,7 @@ def get_facts(vals):
         prosody_target_confidences: 1.0 means impose target completely, 0.0 not at all, 
                   inbetween -- linearly interpoalate?
         '''
+
         if prosody_targets:
             if not prosody_target_confidences:
                 prosody_target_confidences = [1.0] * len(prosody_targets)
@@ -2791,7 +2793,7 @@ def get_facts(vals):
             frags['src_strt_sec'].append(start / float(fs))
             frags['src_end_sec'].append(end / float(fs))
 
-        synth_wave = lwg.wavgen_improved_just_slope(frags, wav_dir, pm_reaper_dir, nfft, fs, npm_margin=3, diff_mf_tres=25, f0_trans_nfrms_btwn_voi=8)
+        synth_wave = lwg.wavgen_improved_just_slope(frags, wav_dir, pm_reaper_dir, nfft, fs, npm_margin=3, diff_mf_tres=25, f0_trans_nfrms_btwn_voi=8, prosody_targets=prosody_targets, prosody_target_confidences=prosody_target_confidences)
         la.write_audio_file(fname, synth_wave, fs, norm=True)
 
     def concatenateMagPhaseEpoch(self, path, fname, fzero=np.zeros(0)):

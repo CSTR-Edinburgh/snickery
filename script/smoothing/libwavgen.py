@@ -14,6 +14,8 @@ import libaudio as la
 import libutils as lu
 import numpy as np
 import fft_feats as ff
+from scipy import interpolate # CVB added
+
 #from plot_funcs import pl
 #pl.close('all')
 # v4: Simple synth  just concatenation in time domain. (NOTE!!: frame "duplicated" in joins!!)
@@ -1145,8 +1147,183 @@ def wavgen_improved(uttfile, db_dir, pm_reaper_dir, nfft, fs, npm_margin=3, diff
 
     return v_syn_sig
 
+# ----
+# new function - CVB
+def adjust_prosody_targets( d_utt_data, v_f0, v_start_segs, npm_margin, prosody_targets, prosody_target_confidences):
+
+    # Flags to help debug
+    adjust_en    = False
+    adjust_f0    = False
+    adjust_dur   = True
+
+    f0_data      = v_f0
+    fft_data     = d_utt_data['m_fft'] # complex spectrum
+
+    nsegs        = len(fft_data) # number of segments
+    total_dur    = 0.0
+    total_frames = 0
+
+    new_v_start_segs = v_start_segs
+
+    # mag_data = np.zeros( ( nsegs , 1 ))
+    # str_data = np.zeros( ( nsegs , 1 ))
+
+    for nxs in xrange(nsegs):
+
+        # Getting target values
+        target_en   = prosody_targets[nxs][1] # this is the mean of the first mcep from STRAIGHT (no unit...)
+        target_f0   = np.exp( prosody_targets[nxs][2]) # in Hz
+        target_dur  = prosody_targets[nxs][0] # in ms
+
+        # Complex spectrum of the segment
+        fft_seg     = fft_data[nxs]
+        num_frames, num_coeff = fft_seg.shape
+        new_num_frames = num_frames
+
+        # F0 of the segment
+        if nxs < (nsegs-1):
+            f0_seg  = f0_data[ v_start_segs[nxs] : v_start_segs[nxs+1] ]
+        else:
+            f0_seg  = f0_data[ v_start_segs[nxs] : ] # final segment
+        f0_seg_voic = f0_seg[f0_seg > 0.0] # get F0 of voiced frames only
+        new_f0_seg  = f0_seg
+        num_f0_frames = f0_seg.size
+
+        ####### Energy adjustment ############################
+        if adjust_en and target_en != 0.0 : # dont modify silence
+            # Calculating c0 (from mag) and newc0 (from target energy)
+            log_pow = np.log( np.power( np.absolute(fft_seg) , 2 ) ) # num_frames x 2049
+            c0      = np.mean( log_pow , axis = 1) # mean across freq
+            c0      = np.mean( c0 ) # mean across frames
+            target_c0 = 1.6667*target_en - 18.333
+            #target_c0  = ( target_en - 9.7 ) /0.44 # According to a linear fitting between straight c0 ([2 8]) and MagPhase c0 ([-15 -5]) found for the first 50 Pirate sentences
+            # mag_data[nxs] = c0 # To find this mapping
+            # str_data[nxs] = target_en # To find this mapping
+            # Calculate newc0 according to confidence
+            newc0   = ( 1 - prosody_target_confidences[nxs] )*c0 + prosody_target_confidences[nxs] *target_c0
+            # Calculate factor to modify mag
+            K = newc0 / c0
+            # Modify complex spectrum
+            fft_data[nxs] = np.power( np.absolute(fft_seg) , 1/K ) * np.exp(np.angle(fft_seg) * 1j )
+
+        ###### F0 adjustment ##################################
+        if adjust_f0:
+            # Get mean F0 for that segment
+            if f0_seg_voic.size == 0:
+                f0_seg_mean = 0.0 # if there are no voiced frames then mean seg f0 is 0
+            else:
+                f0_seg_mean = f0_seg_voic.mean()
+            # Calculate factor to modify F0
+            if f0_seg_mean == 0.0 or target_f0 == 0.0:
+                K = 1.0 # dont modify if either seg or target F0 is zero
+            else:
+                new_f0_seg_mean = ( 1 - prosody_target_confidences[nxs] )*f0_seg_mean + prosody_target_confidences[nxs] *target_f0
+                K = new_f0_seg_mean / f0_seg_mean
+            # Modify F0
+            if nxs < (nsegs-1):
+                f0_data[ v_start_segs[nxs] : v_start_segs[nxs+1] ] *= K
+            else:
+                f0_data[ v_start_segs[nxs] : -1 ] *= K
+
+        ##### Duration adjustment ############################
+        # dont modify the first 2 and the last segment and segments that are too small
+        if adjust_dur and nxs > 1 and nxs != nsegs-1 and f0_seg.size>3 :
+
+            # Get F0 segment again in case it was modified
+            if nxs < (nsegs-1):
+                f0_seg  = f0_data[ v_start_segs[nxs] : v_start_segs[nxs+1] ]
+            else:
+                f0_seg  = f0_data[ v_start_segs[nxs] : ] # final segment
+            f0_seg_voic = f0_seg[f0_seg > 0.0] # get F0 of voiced frames only
+
+            # Estimate duration of current segment
+            dur_seg = calculateDuration(f0_seg)
+            total_dur += dur_seg
+
+            # Calculate new duration
+            new_dur_seg = ( 1 - prosody_target_confidences[nxs] )*dur_seg + prosody_target_confidences[nxs] *target_dur
+            #new_dur_seg += 2.5 # might want to add this to correct for removing two many frames
+
+            # Estimate new number of frames
+            new_num_f0_frames = int(num_f0_frames * new_dur_seg / dur_seg)
+
+            # Modify number of F0 frames
+            newx       = np.linspace(0, num_f0_frames-1, new_num_f0_frames)
+            f          = interpolate.interp1d( np.arange(num_f0_frames) , f0_seg, kind='cubic')
+            new_f0_seg = f(newx) # comment if you do not wish to update
+            new_f0_seg[new_f0_seg < 100] = 0.0 # it fixes interpolation with unvoiced segments issue
+
+            ### Modify number of FFT frames
+            # Get spec again in case it was modified
+            fft_seg    = fft_data[nxs]
+            new_num_frames = new_num_f0_frames + 2*npm_margin
+            # new_num_frames = num_frames # uncomment if you do not wish to update
+            # Modify fft spec - interpolate mag and phase seperatly -- interp2d doesnt work with complex arrays
+            newx    = np.linspace(0, num_frames-1, new_num_frames )
+            mag_seg = np.absolute( fft_seg )
+            ph_seg  = np.angle( fft_seg )
+            f       = interpolate.interp2d( np.arange(num_coeff) , np.arange(num_frames), mag_seg, kind='cubic')
+	    new_mag_seg = f(np.arange(num_coeff), newx)
+            f       = interpolate.interp2d( np.arange(num_coeff) , np.arange(num_frames), ph_seg, kind='cubic')
+            new_ph_seg  = f(np.arange(num_coeff), newx)
+            new_fft_seg = new_mag_seg * np.exp( new_ph_seg * 1j )
+
+            fft_data[nxs] = new_fft_seg # comment if you do not wish to update
+	    
+	    # Recalculate duration
+            real_new_dur_seg = calculateDuration(new_f0_seg)
+	    #print real_new_dur_seg - new_dur_seg
+
+        # Update F0 trajectory
+        if nxs==0:
+            new_v_f0 = new_f0_seg
+            new_v_start_segs[nxs] =  0
+        else:
+            new_v_start_segs[nxs] =  new_v_f0.size
+            new_v_f0 = np.concatenate( (new_v_f0, new_f0_seg) )
+
+        # Update number of frames
+        total_frames += new_num_frames
+        new_v_shift = np.zeros( (new_num_frames,1) ) # it just needs to have the correct num frames
+        d_utt_data['v_shift'][nxs] = new_v_shift
+
+
+    print d_utt_data['nfrms_tot']
+    print total_frames
+
+    # Update FFT and F0 data
+    d_utt_data['m_fft'] = fft_data
+    d_utt_data['nfrms_tot'] = total_frames
+    v_f0 = new_v_f0
+    v_start_segs = new_v_start_segs
+
+    # # To find the mapping
+    # array_to_binary_file(mag_data, '/afs/inf.ed.ac.uk/group/cstr/projects/scar/SCRIPT/Blizzard/halfphone/mapping/magphase/test.c0')
+    # array_to_binary_file(str_data, '/afs/inf.ed.ac.uk/group/cstr/projects/scar/SCRIPT/Blizzard/halfphone/mapping/straight/test.c0')
+
+    return d_utt_data, v_f0, v_start_segs
+
+#--- new function CVB - duration in ms
+def calculateDuration(f0_seg):        
+    dur_unvoic  = 5 * ( f0_seg[f0_seg == 0.0].size) # in ms
+    f0_seg_voic = f0_seg[f0_seg > 0.0]
+    f0_seg_voic = f0_seg_voic[1:]
+    if f0_seg_voic.size == 0:
+        dur_voic = 0.0
+    else:
+        dur_voic = 1000.0 * np.sum(1/f0_seg_voic) # in ms
+    dur_seg = dur_voic + dur_unvoic
+    return dur_seg
+
+#--- new function CVB - To find the mapping
+def array_to_binary_file(data, output_file_name):
+    data = np.array(data, 'float32')
+    fid = open(output_file_name, 'ab')
+    data.tofile(fid)
+    fid.close()
+
 #----------------------------------------------------------------------------------------------
-def wavgen_improved_just_slope(uttfile, db_dir, pm_reaper_dir, nfft, fs, npm_margin=3, diff_mf_tres=25, f0_trans_nfrms_btwn_voi=8):
+def wavgen_improved_just_slope(uttfile, db_dir, pm_reaper_dir, nfft, fs, npm_margin=3, diff_mf_tres=25, f0_trans_nfrms_btwn_voi=8, prosody_targets=[],prosody_target_confidences=[]):
 
     # BODY:===========================
     #wav_dir = db_dir + '/wav' # commented CVB
@@ -1188,6 +1365,11 @@ def wavgen_improved_just_slope(uttfile, db_dir, pm_reaper_dir, nfft, fs, npm_mar
 
     # Transpose and slope adjustment:------------------------
     #v_f0_transp, v_transp_facts = transpose_f0(v_f0, v_voi, v_start_segs, nfrms_btwn_voi=f0_trans_nfrms_btwn_voi)
+
+    # Adjust prosody targets - CVB
+    if prosody_targets:
+        print "Adjusting prosody:"
+        d_utt_data_mix, v_f0, v_start_segs = adjust_prosody_targets( d_utt_data_mix, v_f0, v_start_segs, npm_margin, prosody_targets, prosody_target_confidences)
 
     v_f0_fix_slope = smooth_by_slope_to_average(v_f0, v_start_segs, in_type='f0')
     #v_f0_transp = v_f0_fix_slope
