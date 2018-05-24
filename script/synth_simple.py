@@ -133,11 +133,10 @@ class Synthesiser(object):
             self.set_target_weights(self.config['target_stream_weights'])
             self.set_join_weights(self.config['join_stream_weights'])
 
-        ## !TODO: reinstate?
-        # if 'truncate_target_streams' in self.config:
-        #     self.truncate_target_streams(self.config['truncate_target_streams'])
-        # if 'truncate_join_streams' in self.config:
-        #     self.truncate_join_streams(self.config['truncate_join_streams'])
+        if 'truncate_target_streams' in self.config:
+            self.truncate_target_streams(self.config['truncate_target_streams'])
+        if 'truncate_join_streams' in self.config:
+            self.truncate_join_streams(self.config['truncate_join_streams'])
 
         self.first_silent_unit = 0 ## assume first unit is a silence, for v naive backoff
 
@@ -390,6 +389,14 @@ class Synthesiser(object):
         unit_features = weight(unit_features, self.target_weight_vector)       
         n_units, _ = unit_features.shape
         self.stop_clock(start_time)
+
+        if hasattr(self, 'target_truncation_vector'):
+            print 'truncate target streams...'
+            print unit_features.shape
+            unit_features = unit_features[:, self.target_truncation_vector]
+            #print unit_features.shape
+            #sys.exit('wewevws000')
+
 
         if self.config.get('debug_with_adjacent_frames', False):
             print 'Concatenate naturally contiguous units to debug concatenation!'
@@ -777,50 +784,50 @@ class Synthesiser(object):
         assert self.config['target_representation'] == 'epoch'
         assert self.config['greedy_search']
 
-        for key in ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', 'search_epsilon', 'multiepoch', 'magphase_use_target_f0', 'magphase_overlap']:
+        for key in ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', \
+                'search_epsilon', 'multiepoch', 'magphase_use_target_f0', 'magphase_overlap',\
+                'truncate_target_streams', 'truncate_join_streams']:
             assert key in changed_config_values, key
 
         rebuild_tree = False
-        small_change = False ## dont need to rebuild, but register a change has happened
-        
-        if self.config['join_cost_weight'] != changed_config_values['join_cost_weight']:
-            self.config['join_cost_weight'] = changed_config_values['join_cost_weight']
-            rebuild_tree = True
+        #small_change = False ## dont need to rebuild, but register a change has happened
+        description_of_change = ''  ## if this is non-empty, then a change has been made
 
-        if self.config['join_stream_weights'] != changed_config_values['join_stream_weights']:
-            self.config['join_stream_weights'] = changed_config_values['join_stream_weights']
-            rebuild_tree = True
+        for item in ['join_cost_weight', 'join_stream_weights', 'target_stream_weights', \
+                      'multiepoch', 'truncate_target_streams', 'truncate_join_streams']:
+            if self.config[item] != changed_config_values[item]:
+                description_of_change += '%s: %s -> %s\n'%(item, self.config[item], changed_config_values[item])                
+                self.config[item] = changed_config_values[item]
+                rebuild_tree = True
 
-        if self.config['target_stream_weights'] != changed_config_values['target_stream_weights']:
-            self.config['target_stream_weights'] = changed_config_values['target_stream_weights']
-            rebuild_tree = True
 
-        if self.config['multiepoch'] != changed_config_values['multiepoch']:
-            self.config['multiepoch'] = changed_config_values['multiepoch']
-            rebuild_tree = True
-
+        ## loop not easy here because of defaults:-
         if self.config.get('search_epsilon', 1.0) != changed_config_values['search_epsilon']:
+            description_of_change += '%s: %s -> %s\n'%(item, self.config.get('search_epsilon', 1.0), changed_config_values['search_epsilon'])  
             self.config['search_epsilon'] = changed_config_values['search_epsilon']
-            small_change = True
-
+            
         if self.config.get('magphase_use_target_f0', True) != changed_config_values['magphase_use_target_f0']:
+            description_of_change += '%s: %s -> %s\n'%(item, self.config.get('magphase_use_target_f0', True), changed_config_values['magphase_use_target_f0'])  
             self.config['magphase_use_target_f0'] = changed_config_values['magphase_use_target_f0']
-            small_change = True
-
+            
         if self.config.get('magphase_overlap', 0) != changed_config_values['magphase_overlap']:
+            description_of_change += '%s: %s -> %s\n'%(item, self.config.get('magphase_overlap', 0), changed_config_values['magphase_overlap'])  
             self.config['magphase_overlap'] = changed_config_values['magphase_overlap']
-            small_change = True
-
+            
         if rebuild_tree:
             print 'set join weights after reconfiguring'
             self.set_join_weights(np.array(self.config['join_stream_weights']) * self.config['join_cost_weight'])
             print 'set target weights after reconfiguring'
             self.set_target_weights(np.array(self.config['target_stream_weights']) * (1.0 - self.config['join_cost_weight']))   
-            print 'tree...'           
+            print 'truncate...'  
+
+            self.truncate_target_streams(self.config['truncate_target_streams'])
+            self.truncate_join_streams(self.config['truncate_join_streams'])
+            print 'tree'
             self.get_tree_for_greedy_search()
             print 'done'
 
-        return (rebuild_tree or small_change)
+        return description_of_change # (rebuild_tree or small_change)
 
 
 
@@ -834,7 +841,9 @@ class Synthesiser(object):
         execfile(self.config_file, refreshed_config)
         del refreshed_config['__builtins__']
 
-        keys = ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', 'search_epsilon', 'multiepoch', 'magphase_use_target_f0', 'magphase_overlap']
+        keys = ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', \
+                'search_epsilon', 'multiepoch', 'magphase_use_target_f0', 'magphase_overlap',\
+                'truncate_target_streams', 'truncate_join_streams']
             
         changed_config_values = [refreshed_config[key] for key in keys]
         changed_config_values = dict(zip(keys, changed_config_values))
@@ -943,38 +952,25 @@ class Synthesiser(object):
         print path
 
 
-    #### reinstate?
     def get_selection_vector(self, stream_list, stream_dims, truncation_values):
         '''Return index list for selecting features by advanced indexing corresponding to the required truncation of streams'''
         assert len(truncation_values) == len(stream_list), (truncation_values, stream_list)
         selection_vector = []
         start = 0
-        #print 'get_selection_vector'
         for (stream, trunc) in zip(stream_list, truncation_values):
             stream_dim = stream_dims[stream] 
-            #print (stream_dim, trunc)
             if trunc == -1:
                 trunc = stream_dim
             assert trunc <= stream_dim, 'stream %s has only %s dims, cannot truncate to %s'%(stream, stream_dim, trunc)
             selection_vector.extend(range(start, start+trunc))
             start += stream_dim  
-        #print len(selection_vector)
-        #print selection_vector
         return selection_vector
 
-    #### reinstate?
     def truncate_join_streams(self, truncation_values):
         selection_vector = self.get_selection_vector(self.stream_list_join, self.datadims_join, truncation_values)
-
-        if self.config['target_representation'] == 'epoch':
-            ### for join streams, double up selection vector:
-            dim = sum([self.datadims_join[stream] for stream in self.stream_list_join])
-            selection_vector = selection_vector + [val + dim for val in selection_vector]
-
         self.unit_end_data = self.unit_end_data[:, selection_vector]
         self.unit_start_data = self.unit_start_data[:, selection_vector]
         
-    #### reinstate?
     def truncate_target_streams(self, truncation_values):
         selection_vector = self.get_selection_vector(self.stream_list_target, self.datadims_target, truncation_values)
         self.train_unit_features = self.train_unit_features[:, selection_vector]
