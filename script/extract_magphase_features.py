@@ -110,9 +110,7 @@ def magphase_analysis(wav_file, outdir='', fft_len=None, nbins_mel=60, nbins_pha
         lu.write_binfile(m_imag_mcep, os.path.join(outdir_lo, 'imag_cc', file_id + '.imag_cc'))
 
 
-if __name__ == '__main__':
-
-
+def main_work():
 
     #################################################
       
@@ -156,7 +154,7 @@ if __name__ == '__main__':
         except KeyboardInterrupt:
             print 'parent received control-c'
             return        
-            
+
         pool.close() 
 
 
@@ -166,3 +164,8 @@ if __name__ == '__main__':
             magphase_analysis(wav_file, outdir=opts.output_dir, fft_len=opts.fftlen, nbins_mel=opts.m, nbins_phase=opts.p, pm_dir=opts.pm_dir, cepstra=opts.cepstra) 
 
 
+
+
+if __name__ == '__main__':
+
+    main_work()
