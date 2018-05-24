@@ -43,7 +43,7 @@ from speech_manip import read_wave, write_wave, weight, get_speech
 from label_manip import break_quinphone, extract_monophone
 from train_halfphone import get_data_dump_name, compose_speech, standardise, destandardise, \
         read_label, get_halfphone_stats, reinsert_terminal_silence, make_train_condition_name, \
-        locate_stream_directories, get_prosody_targets
+        locate_stream_directories, get_prosody_targets, get_norm_durations
 
 DODEBUG=False ## print debug information?
 
@@ -144,6 +144,10 @@ def random_subset_data(data, seed=1234, train_frames=0):
     return shuff_data    
         
 
+## workaround to parallelise class method (http://www.rueckstiess.net/research/snippets/show/ca1d7d90):
+def synth_utt_wrapper((synth_instance, base), synth_type='tune', outstem='', outdir=''):
+    Synthesiser.synth_utt(synth_instance, base, synth_type=synth_type, outstem=outstem, outdir=outdir)
+
 class Synthesiser(object):
 
     def __init__(self, config_file, holdout_percent=0.0):
@@ -198,6 +202,14 @@ class Synthesiser(object):
         self.std_vec_join = f["std_join"][:] 
 
         self.join_contexts_unweighted = f["join_contexts"][:,:]
+
+        if self.config.get('add_duration_as_target', False):
+            monophones = f["duration_monophones"][:] 
+            stats = f["duration_stats"][:,:]
+            mean = stats[:,0].tolist()
+            std = stats[:,1].tolist() 
+            self.duration_stats = dict(zip(monophones, zip(mean, std)))
+            
 
 
         if self.config.get('store_full_magphase', False):
@@ -402,6 +414,7 @@ class Synthesiser(object):
         if self.config.get('tune_data_dirs', ''):
             self.tune_data_target_dirs = locate_stream_directories(self.config['tune_data_dirs'], self.stream_list_target)
 
+
     def reconfigure_settings(self, changed_config_values):
         '''
         Currently used by weight tuning script -- adjust configs and rebuild trees etc as 
@@ -460,6 +473,40 @@ class Synthesiser(object):
 
 
 
+    def reconfigure_settings_halfphone(self, changed_config_values):
+        '''
+        Return True if anything has changed in config, else False
+        '''
+        print 'reconfiguring synthesiser...'
+        
+        for key in ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', 'duration_target_weight', 'impose_prosody_targets', 'impose_target_prosody_factor', 'target_duration_stretch_factor']:  
+
+            assert key in changed_config_values, key
+
+        small_change = False ## dont need to rebuild, but register a change has happened
+        
+        if self.config['join_cost_weight'] != changed_config_values['join_cost_weight']:
+            self.config['join_cost_weight'] = changed_config_values['join_cost_weight']
+            small_change = True
+
+        if self.config['join_stream_weights'] != changed_config_values['join_stream_weights']:
+            self.config['join_stream_weights'] = changed_config_values['join_stream_weights']
+            small_change = True
+
+        if self.config['target_stream_weights'] != changed_config_values['target_stream_weights']:
+            self.config['target_stream_weights'] = changed_config_values['target_stream_weights']
+            small_change = True
+
+        if small_change:
+            print 'reset all weights after reconfiguring'            
+            self.set_join_weights(np.array(self.config['join_stream_weights']) * self.config['join_cost_weight'])
+            self.set_target_weights(np.array(self.config['target_stream_weights']) * (1.0 - self.config['join_cost_weight']))               
+
+        return small_change
+
+
+
+
     def reconfigure_from_config_file(self):
         '''
         Currently used by weight tuning script -- adjust configs and rebuild trees etc as 
@@ -470,11 +517,19 @@ class Synthesiser(object):
         execfile(self.config_file, refreshed_config)
         del refreshed_config['__builtins__']
 
-        keys = ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', 'search_epsilon', 'multiepoch', 'magphase_use_target_f0', 'magphase_overlap']
-            
+        if self.config['target_representation'] == 'epoch':
+            keys = ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', 'search_epsilon', 'multiepoch', 'magphase_use_target_f0', 'magphase_overlap']
+        elif self.config['target_representation'].endswith('point'):
+            keys = ['join_stream_weights', 'target_stream_weights', 'join_cost_weight', 'duration_target_weight', 'impose_prosody_targets', 'impose_target_prosody_factor']
+        else:
+            sys.exit('reconfigure_from_config_file -- only for epoch and halfphone voices')
+
         changed_config_values = [refreshed_config[key] for key in keys]
         changed_config_values = dict(zip(keys, changed_config_values))
-        anything_changed = self.reconfigure_settings(changed_config_values)
+        if self.config['target_representation'] == 'epoch':
+            anything_changed = self.reconfigure_settings(changed_config_values)
+        else:
+            anything_changed = self.reconfigure_settings_halfphone(changed_config_values)
 
         return anything_changed
 
@@ -665,7 +720,14 @@ class Synthesiser(object):
             # else:
                 target_weight_vector.extend([weights[i]]*self.datadims_target[stream])
         nrepetitions = const.target_rep_widths[self.target_representation]
-        target_weight_vector = np.array(target_weight_vector * nrepetitions)   
+
+        target_weight_vector = target_weight_vector * nrepetitions
+        if self.config.get('add_duration_as_target', False):
+            target_weight_vector.append(self.config.get('duration_target_weight', 0.0))
+
+        target_weight_vector = np.array(target_weight_vector)   
+
+
         self.train_unit_features = weight(self.train_unit_features_unweighted, target_weight_vector)   
 
         if self.holdout_samples > 0:
@@ -734,18 +796,18 @@ class Synthesiser(object):
         self.concatenate(np.arange(100, 150), ofile)    
         
 
-    def get_sentence_set(self, set_name): 
+    def get_sentence_set(self, set_name, no_overwrite=''): 
         assert set_name in ['test', 'tune']
 
         first_stream = self.stream_list_target[0]
 
         if set_name == 'test':
             data_dirs = self.test_data_target_dirs[first_stream]
-            name_patterns = self.config['test_patterns']
+            name_patterns = self.config.get('test_patterns', [])
             limit = self.config['n_test_utts']
         elif set_name == 'tune':
             data_dirs = self.tune_data_target_dirs[first_stream]
-            name_patterns = self.config['tune_patterns']
+            name_patterns = self.config.get('tune_patterns', [])
             limit = self.config['n_tune_utts']            
         else:
             sys.exit('Set name unknown: "%s"'%(set_name))
@@ -755,14 +817,15 @@ class Synthesiser(object):
 
         ## find all files containing one of the patterns in test_patterns
         L = len(flist)
-        selected_flist = []
-        for (i,fname) in enumerate(flist):
-            for pattern in name_patterns:
-                if pattern in fname:
-                    if fname not in selected_flist:
-                        selected_flist.append(fname)
-                    
-        flist = selected_flist 
+        if name_patterns:
+            selected_flist = []
+            for (i,fname) in enumerate(flist):
+                for pattern in name_patterns:
+                    if pattern in fname:
+                        if fname not in selected_flist:
+                            selected_flist.append(fname)
+                        
+            flist = selected_flist 
 
         ## check sentences not in training:
         if 1:
@@ -779,6 +842,13 @@ class Synthesiser(object):
         ### Only synthesise n sentences:
         if limit > 0:
             flist = flist[:limit]
+
+
+        if no_overwrite:
+            print 'Do not resynthesise sentences already produced:'
+            already_synthesised = [basename(fname) for fname in glob.glob(no_overwrite + '/*.wav')]
+            print already_synthesised
+            flist = [thing for thing in flist if thing not in already_synthesised]
 
         nfiles = len(flist)
         if nfiles == 0:
@@ -818,71 +888,24 @@ class Synthesiser(object):
 
 
 
-    def synth_from_config(self, inspect_join_weights_only=False, synth_type='test', outdir=''):
+    def synth_from_config(self, inspect_join_weights_only=False, synth_type='test', outdir='', ncores=1):
 
         self.report('synth_from_config')
 
+        test_flist = self.get_sentence_set(synth_type, no_overwrite=outdir)
 
-        test_flist = self.get_sentence_set(synth_type)
+        if ncores > 1:
+            import multiprocessing
+            import functools
+            ## Use partial to pass fixed arguments to the func (https://stackoverflow.com/questions/5442910/python-multiprocessing-pool-map-for-multiple-arguments):
+            pool = multiprocessing.Pool(processes=ncores) 
+            results = pool.map( functools.partial(synth_utt_wrapper, synth_type=synth_type, outdir=outdir), zip([self]*len(test_flist), test_flist))
+            pool.close() 
+            
 
-
-
-        # if self.mode_of_operation == 'stream_weight_balancing':
-        #     all_tscores = []
-        #     all_jscores = []
-
-
-        # all_distances = []
-
-        for fname in test_flist:
-            # if inspect_join_weights_only:
-            #     all_distances.append(self.inspect_join_weights_on_utt(fname))
-            #     # print 'single utt -- break'
-            #     # break 
-            # else:
-
-            # if self.mode_of_operation == 'stream_weight_balancing':
-            #     tscores, jscores = self.synth_utt(fname)    
-            #     all_tscores.append(tscores)
-            #     all_jscores.append(jscores)
-            # else:    
-
-
-            self.synth_utt(fname, synth_type=synth_type, outdir=outdir)    
-
-        # if self.mode_of_operation == 'stream_weight_balancing':
-        #     all_tscores = np.vstack(all_tscores)
-        #     all_jscores = np.vstack(all_jscores)
-
-        #     mean_tscores = np.mean(all_tscores, axis=0)
-        #     mean_jscores = np.mean(all_jscores, axis=0)
-
-        #     # self.report( '------------- join and target cost summaries by stream -----------')
-        #     # self.report('')
-
-        #     # for (stream, mu) in zip (self.stream_list_join, mean_jscores ):
-        #     #     self.report( 'join   %s -- mean: %s   '%(stream.ljust(10), mu))
-        #     # self.report('')
-        #     # for (stream, mu) in zip (self.stream_list_target, mean_tscores ):
-        #     #     self.report( 'target %s -- mean: %s   '%(stream.ljust(10), mu))
-        #     # self.report('')
-        #     # self.report( '--------------------------------------------------------------------')
-
-        #     if verbose:
-        #         print( '------------- join and target cost summaries by stream -----------')
-        #         print('')
-
-        #         for (stream, mu) in zip (self.stream_list_join, mean_jscores ):
-        #             print( 'join   %s -- mean: %s   '%(stream.ljust(10), mu))
-        #         print('')
-        #         for (stream, mu) in zip (self.stream_list_target, mean_tscores ):
-        #             print( 'target %s -- mean: %s   '%(stream.ljust(10), mu))
-        #         print('')
-        #         print( '--------------------------------------------------------------------')
-
-
-        #     return (all_tscores, all_jscores)
-        #     #return ((all_tscores.mean(axis=0), all_jscores.mean(axis=0)),  (all_tscores.std(axis=0), all_jscores.std(axis=0)))
+        else:
+            for fname in test_flist:
+                self.synth_utt(fname, synth_type=synth_type, outdir=outdir)    
 
 
 
@@ -1519,6 +1542,11 @@ def get_facts(vals):
                 unit_features = unit_features[15:20, :]
                 unit_timings = unit_timings[15:20]
 
+
+        if self.config.get('add_duration_as_target', False):
+            norm_durations = get_norm_durations(unit_names, unit_timings, self.duration_stats)
+            norm_durations *= self.config.get('target_duration_stretch_factor', 1.0)
+            unit_features = np.hstack([unit_features, norm_durations])
 
         if self.config['weight_target_data']:                                
             unit_features = weight(unit_features, self.target_weight_vector)       
@@ -3532,6 +3560,8 @@ if __name__ == '__main__':
     a = ArgumentParser()
     a.add_argument('-c', dest='config_fname', required=True)
     a.add_argument('-o', dest='output_dir', required=False, default='')
+    a.add_argument('-p', dest='ncores', type=int, default=1, required=False)
+    
     opts = a.parse_args()
 
 
@@ -3544,5 +3574,5 @@ if __name__ == '__main__':
             os.makedirs(opts.output_dir)
         os.system('cp %s %s'%(opts.config_fname, opts.output_dir))
 
-    synth.synth_from_config(inspect_join_weights_only=False, synth_type='test', outdir=opts.output_dir)
+    synth.synth_from_config(inspect_join_weights_only=False, synth_type='test', outdir=opts.output_dir, ncores=opts.ncores)
 
