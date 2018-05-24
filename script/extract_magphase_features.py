@@ -90,7 +90,7 @@ def magphase_analysis(wav_file, outdir='', fft_len=None, nbins_mel=60, nbins_pha
 
     if not skip_low:
         # Low dimension (Formatting for Acoustic Modelling):
-        m_mag_mel_log, m_real_mel, m_imag_mel, v_lf0_smth = mp.format_for_modelling(m_mag, m_real, m_imag, v_f0, fs, nbins_mel=nbins_mel, nbins_phase=nbins_phase)
+        m_mag_mel_log, m_real_mel, m_imag_mel, v_lf0_smth = mp.format_for_modelling(m_mag, m_real, m_imag, v_f0, fs, mag_dim=nbins_mel, phase_dim=nbins_phase)
         # fft_len = 2*(np.size(m_mag,1) - 1)
 
         ### write low-dim data:
