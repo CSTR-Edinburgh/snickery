@@ -150,8 +150,14 @@ if __name__ == '__main__':
 
         pool = multiprocessing.Pool(processes=opts.ncores) 
         results = pool.map(functools.partial(magphase_analysis, outdir=opts.output_dir, fft_len=opts.fftlen, nbins_mel=opts.m, nbins_phase=opts.p, pm_dir=opts.pm_dir, cepstra=opts.cepstra), wavlist)         
-        pool.close() #we are not adding any more processes
-        #pool.join() #tell it to wait until all threads are done before going on
+
+        try:
+            print 'done!'
+        except KeyboardInterrupt:
+            print 'parent received control-c'
+            return        
+            
+        pool.close() 
 
 
     else:
