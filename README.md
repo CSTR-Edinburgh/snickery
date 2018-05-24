@@ -1,3 +1,5 @@
+# Snickery (minimal version)
+
 This README is about use of scripts:
 
 ```
@@ -5,7 +7,7 @@ script/synth_simple.py
 script/train_simple.py
 ```
 
-These are simplified version of the scripts 
+These are simplified version of the scripts:
 
 ```
 script/synth_halfphone.py 
@@ -42,133 +44,8 @@ pip install numpy
 pip install scipy   ## required by sklearn
 pip install h5py
 pip install sklearn
+pip install matplotlib
 ```
-
-
-
-### Local install of OpenFST binaries & OpenFST Python bindings
-
-Try this one first, this definitely worked for me on Linux (DICE):-
-
-<!-- 
-## Oliver:
-export MY_OPENFST_DIR=/afs/inf.ed.ac.uk/user/o/owatts/tool/openfst_for_hybrid
- -->
-
-```
-## Make location for downloading and compiling OpenFST
-export MY_OPENFST_DIR=/your/chosen/location
-mkdir $MY_OPENFST_DIR
-cd $MY_OPENFST_DIR
-wget http://www.openfst.org/twiki/pub/FST/FstDownload/openfst-1.5.4.tar.gz
-tar xvf openfst-1.5.4.tar.gz
-cd openfst-1.5.4/
-./configure --prefix=${MY_OPENFST_DIR} --enable-far --enable-mpdt --enable-pdt
-make
-make install  
-
-## While still in virtual environment as above, install Python bindings (pywrapfst module) like this:
-pip install --global-option=build_ext  --global-option="-I${MY_OPENFST_DIR}/include" --global-option="-L${MY_OPENFST_DIR}/lib" --global-option="-R${MY_OPENFST_DIR}/lib" openfst==1.5.4
-```
-
-
-
-### System-wide install OpenFST binaries & OpenFST Python bindings 
-
-I think I needed to do this to get the tools compiled on Mac (please let me know if the above did in fact work OK for you):
-
-```
-## Make location for downloading and compiling OpenFST
-export MY_OPENFST_DIR=/your/chosen/location
-mkdir $MY_OPENFST_DIR
-cd $MY_OPENFST_DIR
-wget http://www.openfst.org/twiki/pub/FST/FstDownload/openfst-1.5.4.tar.gz
-tar xvf openfst-1.5.4.tar.gz
-cd openfst-1.5.4/
-./configure --enable-far --enable-mpdt --enable-pdt
-make
-sudo make install   # sudo for system-wide install to /usr/local/bin/ etc.
-
-## While still in virtual environment as above, install Python bindings (pywrapfst module) like this:
-pip install openfst==1.5.4
-```
-
-
-### Tools for feature extraction
-
-Get GNU parallel to speed up feature extraction:
-
-```
-cd script_data/
-wget http://ftp.gnu.org/gnu/parallel/parallel-20170922.tar.bz2
-tar xvf parallel-20170922.tar.bz2
-mv parallel-20170922/src/parallel .
-rm -r parallel-20170922*
-```
-
-TODO: add notes on obtaining and compiling World & Reaper & other necessary things. For now, look at  `script_data/data_config.txt` to see the dependencies.
-
-  
-<!-- # 
-# ### World and Reaper:
-# # zip from https://github.com/CSTR-Edinburgh/merlin
-# 
-# cd ~/tool/merlin-master/
-#   503  cd tools/WORLD_v2/
-#   504  ls
-#   505  more makefile 
-#   506  make
-#   507  make test
-#   508  ls
-#   511  less makefile 
-#   512  make analysis synth
-#   
-
-# 
-# cd ~/tool/merlin-master/
-#   503  cd tools/WORLD/
-#   504  ls
-#   505  more makefile 
-#   506  make
-#   507  make test
-#   512  make analysis synth
-#   
-#   
-#   
-#   # https://github.com/google/REAPER
-#   
-#   cd /afs/inf.ed.ac.uk/user/o/owatts/tool/REAPER-master
-# mkdir build   # In the REAPER top-level directory
-# cd build
-# cmake ..
-# make
-# 
- -->
-
-
-
-Extract  data -- edit `script_data/data_config.txt` and, using 30 cores on CSTR server zamora:
-
-```
-./script_data/extract_feats_parallel.sh /afs/inf.ed.ac.uk/group/cstr/projects/blizzard_entries/blizzard2017/data/segmented/wav/ /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data
-```
-
-
-... then using 4 cores on my DICE desktop salton:
-
-
-```
-./script_data/resample_feats_parallel.sh /afs/inf.ed.ac.uk/group/cstr/projects/blizzard_entries/blizzard2017/data/segmented/wav/ /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data
-```
-
-Note: initially, extraction and resampling were done with a single script. When using many cores on CSTR servers, the Python code for resampling really slowed things down. I separated the code until I have chance to debug this properly.
-
-As a final step, split MFCCs into energy and 12 others. Also, check the data for some outlying values
-like -10000000000.0 and -5000000000.0 which make standardisation of the data crazy. Do this crudely by setting values outside the range [-100, 100] to 0. These steps should probably be merged into the other scripts):
-
-```
- python ./script_data/split_mfccs.py /afs/inf.ed.ac.uk/group/cstr/projects/nst/oliver/hybrid_work/data/fls_data/pitch_sync/
- ```
 
 ## Running the tools
 
