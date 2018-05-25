@@ -124,7 +124,7 @@ def main_work():
     a.add_argument('-N', dest='nfiles', type=int, default=0)  
     a.add_argument('-m', type=int, default=60, help='low dim feature size (compressed mel magnitude spectrum & cepstrum)')  
     a.add_argument('-p', type=int, default=45, help='low dim feature size (compressed mel phase spectra & cepstra)')          
-    a.add_argument('-fftlen', type=int, default=1024)          
+    a.add_argument('-fftlen', type=int, default=2048)          
     a.add_argument('-ncores', type=int, default=0)   
 
     a.add_argument('-pm_dir', type=str, default='', help='Specify a directory of existing pitchmark files to use, instead of starting from scratch')
