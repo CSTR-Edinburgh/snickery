@@ -109,7 +109,7 @@ Edit a single line of the configuration file ```config/slt_simplified_mini.cfg``
 workdir = '/path/to/your/work/dir/'
 ```
 
-Train like this, 
+Train like this:
 
 ```
 python script/train_simple.py -c config/slt_simplified_mini.cfg
@@ -121,5 +121,21 @@ Output is placed under the directory configured as `workdir`, in a subdirectory 
 Synthesis:
 
 ```
-python script/synth_simple.py -c config/nick_simplified_mini.cfg
+python script/synth_simple.py -c config/slt_simplified_mini.cfg
 ```
+
+
+Now you can try changing settings in the config. Important ones to look at:
+
+- `n_train_utts`: number of sentences to use (you might have to run `extract_magphase_features.py` again to obtain features for more sentences). This is the only one where you will need to run train.py after changing it.
+
+These can be changed without retraining:
+
+- `target_stream_weights` and `join_stream_weights`: scale the importance of different streams in target and join cost. These are just python lists of floats.
+- `join_cost_weight`: overall scaling factor for join stream. Must be between 0.0. and 1.0.
+- `multiepoch`: how many consecutive epochs to select at each timestep
+- `magphase_overlap`: how much to overlap selected units by.
+- `magphase_use_target_f0`: whether to impose the target F0 on the concatenated units.
+- `search_epsilon`: how much to approximate the search. 0 means no approximation, so find the largest setting where there is no perceptible difference from this.
+
+Finally, this demo is training on all-natural speech and testing with natural targets. Clearly, natural targets will not be available to a real TTS system. Tweak the config to work with synthetic speech.
