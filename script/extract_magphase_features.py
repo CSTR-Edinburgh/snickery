@@ -122,6 +122,7 @@ if __name__ == '__main__':
     a.add_argument('-w', dest='wave_dir', required=True)
     a.add_argument('-o', dest='output_dir', required=True)    
     a.add_argument('-N', dest='nfiles', type=int, default=0)  
+    a.add_argument('-l', dest='wavlist_file', default=None)    
     a.add_argument('-m', type=int, default=60, help='low dim feature size (compressed mel magnitude spectrum & cepstrum)')  
     a.add_argument('-p', type=int, default=45, help='low dim feature size (compressed mel phase spectra & cepstra)')          
     a.add_argument('-fftlen', type=int, default=1024)          
@@ -135,7 +136,14 @@ if __name__ == '__main__':
     wav_datadir = opts.wave_dir
     make_magphase_directory_structure(opts.output_dir, cepstra=opts.cepstra)
 
-    wavlist = sorted(glob.glob(wav_datadir + '/*.wav'))
+    if opts.wavlist_file is None:
+        wavlist = sorted(glob.glob(wav_datadir + '/*.wav'))
+    else:
+        wavlist = []
+        with open(opts.wavlist_file) as f:
+            for line in f:
+                line = line.strip()
+                wavlist.append( wav_datadir + '/' + line + '.wav')
     if opts.nfiles > 0:
         wavlist = wavlist[:opts.nfiles]
 
