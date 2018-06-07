@@ -152,8 +152,6 @@ def main_work(config, overwrite_existing_data=False):
         wave_mu_sigma = get_wave_mean_std(config['wav_datadir'], flist, config['sample_rate'], nonlin_wave=config['nonlin_wave'])
 
 
-
-
     ## 1B) Initialise HDF5; store mean and std in HDF5: 
 
     f = h5py.File(database_fname, "w")
@@ -182,6 +180,9 @@ def main_work(config, overwrite_existing_data=False):
 
     target_rep_size = target_dim * target_rep_widths[config.get('target_representation', 'twopoint')]
 
+    if config.get('add_duration_as_target', False):
+        target_rep_size += 1
+
     fshift_seconds = (0.001 * config['frameshift_ms'])
     fshift = int(config['sample_rate'] * fshift_seconds)    
     samples_per_frame = fshift
@@ -190,6 +191,8 @@ def main_work(config, overwrite_existing_data=False):
     
     n_units = 0
 
+    if config.get('add_duration_as_target', False):
+        duration_data = {}
 
     if config['target_representation'] in ['epoch', 'sample']:
         new_flist = []
@@ -208,10 +211,26 @@ def main_work(config, overwrite_existing_data=False):
     else:
         for base in flist:
             labfile = os.path.join(config['label_datadir'], base + '.' + config['lab_extension'])
-            n_states = len(read_label(labfile, config['quinphone_regex']))
+            label = read_label(labfile, config['quinphone_regex'])
+            n_states = len(label)
             assert n_states % 5 == 0
             n_halfphones = (n_states / 5) * 2
             n_units += n_halfphones
+
+            if config.get('add_duration_as_target', False):
+                vals = get_halfphone_lengths(label)
+                for (val, dur) in vals:
+                    if val not in duration_data:
+                        duration_data[val] = []
+                    duration_data[val].append(dur)
+
+    if config.get('add_duration_as_target', False):
+        duration_stats = {}
+        for (phone, vals) in duration_data.items():
+            vals = np.array(vals)
+            duration_stats[phone] = (vals.mean(), max(vals.std(), 0.001)) ## variance floor
+
+
 
     if config['target_representation']  == 'sample': 
         n_units *= (config['sample_rate']*fshift_seconds)
@@ -437,6 +456,10 @@ def main_work(config, overwrite_existing_data=False):
             ## Get representations of half phones to use in target cost:-
             unit_names, unit_features, timings = get_halfphone_stats(t_speech, labs, config.get('target_representation', 'twopoint'))
 
+            if config.get('add_duration_as_target', False):
+                norm_durations = get_norm_durations(unit_names, timings, duration_stats)
+                unit_features = np.hstack([unit_features, norm_durations])
+
             ## Find 'cutpoints': pitchmarks which are considered to be the boudnaries of units, and where those
             ## units will be concatenated:
             cutpoints, cutpoint_indices = get_cutpoints(timings, pms_seconds)
@@ -559,6 +582,16 @@ def main_work(config, overwrite_existing_data=False):
         mp_fz_dset.resize(actual_nframes, axis=0)
 
 
+    if config.get('add_duration_as_target', False):
+        duration_stats = duration_stats.items()
+        duration_stats.sort()
+        duration_monophones = np.array([k for (k,v) in duration_stats])
+        duration_stats = np.array([v for (k,v) in duration_stats])
+        f.create_dataset("duration_monophones", duration_monophones.shape, dtype='|S50', track_times=False)
+        f["duration_monophones"][:] = duration_monophones
+        f.create_dataset("duration_stats", duration_stats.shape, dtype='f', track_times=False)
+        f["duration_stats"][:,:] = duration_stats        
+
     print 
     print 'Storing hybrid voice data:'
     for thing in f.values():
@@ -590,6 +623,7 @@ def main_work(config, overwrite_existing_data=False):
         for thing in fjoin.values():
             print thing
         fjoin.close()
+
 
 
 
@@ -1059,6 +1093,43 @@ def get_prosody_targets(speech, timings, ene_dim=0, lf0_dim=-1, fshift_sec=0.005
     return prosody_targets
 
 
+def get_halfphone_lengths(label):
+    '''
+    Take state timings, return monophone labels and halfphone durations.
+    We arbitrarily assign states 1 & 2 to halfphone 1, and states 3, 4 and 5 to halfphone 2.
+    '''
+    
+    vals = []
+    curr_dur = 0
+    for ((start,end), quinphone) in label:
+        dur = end - start
+        monophone = quinphone[2]
+        state = quinphone[-1]
+
+        curr_dur += dur
+
+        if state == '3':  ## NB: HTK numbering starts at 2
+            vals.append((monophone + '_L', curr_dur))
+            curr_dur = 0
+        if state == '6':
+            vals.append((monophone + '_R', curr_dur))
+            curr_dur = 0
+    return vals
+
+
+def get_norm_durations(unit_names, timings, duration_stats, oov_stats=(5.0, 5.0)):
+    '''
+    Take quinphone names and timings for halfphones, return frame normed durations 
+    '''
+    monophones = [name.split('/')[2] for name in unit_names]
+    durations = [e-s for (s,e) in timings]
+    means = [duration_stats.get(mono, oov_stats)[0] for mono in monophones]
+    stds = [duration_stats.get(mono, oov_stats)[1] for mono in monophones]
+    norm_durations = [(duration-mean)/std for (duration, mean, std) in zip(durations, means, stds)]
+    norm_durations = np.array(norm_durations).reshape((-1,1))
+    return norm_durations
+
+    
 def get_contexts_for_pitch_synchronous_joincost(speech, pm_indices):
     '''
     pm_indices: start and end indices of pitchmarks considered to be unit cutpoints: 

@@ -56,63 +56,63 @@ def magphase_analysis(wav_file, outdir='', fft_len=None, nbins_mel=60, nbins_pha
     little redundancy, and storing pitchmark files.
     '''
 
-    outdir_hi = os.path.join(outdir, 'high')
-    outdir_lo = os.path.join(outdir, 'low')
+    try:
+        outdir_hi = os.path.join(outdir, 'high')
+        outdir_lo = os.path.join(outdir, 'low')
 
-    file_id = os.path.basename(wav_file).split(".")[0]
+        file_id = os.path.basename(wav_file).split(".")[0]
 
-    # Read file:
-    v_sig, fs = sf.read(wav_file)
+        # Read file:
+        v_sig, fs = sf.read(wav_file)
 
-    if not pm_dir:
-        # Epoch detection:
-        est_file = os.path.join(outdir, 'pm', file_id + '.pm') 
-        la.reaper(wav_file, est_file)
-    else:
-        est_file = os.path.join(pm_dir, file_id + '.pm') 
-    v_pm_sec, v_voi = la.read_reaper_est_file(est_file, check_len_smpls=len(v_sig), fs=fs)
-    v_pm_smpls = v_pm_sec * fs
-
-
-
-    # Spectral analysis:
-    m_fft, v_shift = mp.analysis_with_del_comp_from_pm(v_sig, fs, v_pm_smpls, fft_len=fft_len)
-
-    # Getting high-ress magphase feats:
-    m_mag, m_real, m_imag, v_f0 = mp.compute_lossless_feats(m_fft, v_shift, v_voi, fs)
-
-    ### write high-dimensional data:
-    lu.write_binfile(m_mag, os.path.join(outdir_hi, 'mag', file_id + '.mag'))
-    lu.write_binfile(m_real, os.path.join(outdir_hi, 'real', file_id + '.real'))
-    lu.write_binfile(m_imag, os.path.join(outdir_hi, 'imag', file_id + '.imag'))
-    lu.write_binfile(v_f0, os.path.join(outdir_hi, 'f0', file_id + '.f0'))
-    lu.write_binfile(v_shift, os.path.join(outdir, 'shift', file_id + '.shift'))
-
-    if not skip_low:
-        # Low dimension (Formatting for Acoustic Modelling):
-        m_mag_mel_log, m_real_mel, m_imag_mel, v_lf0_smth = mp.format_for_modelling(m_mag, m_real, m_imag, v_f0, fs, nbins_mel=nbins_mel, nbins_phase=nbins_phase)
-        # fft_len = 2*(np.size(m_mag,1) - 1)
-
-        ### write low-dim data:
-        lu.write_binfile(m_mag_mel_log, os.path.join(outdir_lo, 'mag', file_id + '.mag'))
-        lu.write_binfile(m_real_mel, os.path.join(outdir_lo, 'real', file_id + '.real'))
-        lu.write_binfile(m_imag_mel, os.path.join(outdir_lo, 'imag', file_id + '.imag'))
-        lu.write_binfile(v_lf0_smth, os.path.join(outdir_lo, 'lf0', file_id + '.lf0'))
-
-    if cepstra:
-        alpha = {48000: 0.77, 16000: 58}[fs]
-        m_mag_mcep = la.sp_to_mcep(m_mag, n_coeffs=nbins_mel, alpha=alpha, in_type=3)
-        m_real_mcep = la.sp_to_mcep(m_real, n_coeffs=nbins_phase, alpha=alpha, in_type=2)
-        m_imag_mcep = la.sp_to_mcep(m_imag, n_coeffs=nbins_phase, alpha=alpha, in_type=2)
-
-        lu.write_binfile(m_mag_mcep, os.path.join(outdir_lo, 'mag_cc', file_id + '.mag_cc'))
-        lu.write_binfile(m_real_mcep, os.path.join(outdir_lo, 'real_cc', file_id + '.real_cc'))
-        lu.write_binfile(m_imag_mcep, os.path.join(outdir_lo, 'imag_cc', file_id + '.imag_cc'))
+        if not pm_dir:
+            # Epoch detection:
+            est_file = os.path.join(outdir, 'pm', file_id + '.pm') 
+            la.reaper(wav_file, est_file)
+        else:
+            est_file = os.path.join(pm_dir, file_id + '.pm') 
+        v_pm_sec, v_voi = la.read_reaper_est_file(est_file, check_len_smpls=len(v_sig), fs=fs)
+        v_pm_smpls = v_pm_sec * fs
 
 
-if __name__ == '__main__':
 
+        # Spectral analysis:
+        m_fft, v_shift = mp.analysis_with_del_comp_from_pm(v_sig, fs, v_pm_smpls, fft_len=fft_len)
 
+        # Getting high-ress magphase feats:
+        m_mag, m_real, m_imag, v_f0 = mp.compute_lossless_feats(m_fft, v_shift, v_voi, fs)
+
+        ### write high-dimensional data:
+        lu.write_binfile(m_mag, os.path.join(outdir_hi, 'mag', file_id + '.mag'))
+        lu.write_binfile(m_real, os.path.join(outdir_hi, 'real', file_id + '.real'))
+        lu.write_binfile(m_imag, os.path.join(outdir_hi, 'imag', file_id + '.imag'))
+        lu.write_binfile(v_f0, os.path.join(outdir_hi, 'f0', file_id + '.f0'))
+        lu.write_binfile(v_shift, os.path.join(outdir, 'shift', file_id + '.shift'))
+
+        if not skip_low:
+            # Low dimension (Formatting for Acoustic Modelling):
+            m_mag_mel_log, m_real_mel, m_imag_mel, v_lf0_smth = mp.format_for_modelling(m_mag, m_real, m_imag, v_f0, fs, mag_dim=nbins_mel, phase_dim=nbins_phase)
+            # fft_len = 2*(np.size(m_mag,1) - 1)
+
+            ### write low-dim data:
+            lu.write_binfile(m_mag_mel_log, os.path.join(outdir_lo, 'mag', file_id + '.mag'))
+            lu.write_binfile(m_real_mel, os.path.join(outdir_lo, 'real', file_id + '.real'))
+            lu.write_binfile(m_imag_mel, os.path.join(outdir_lo, 'imag', file_id + '.imag'))
+            lu.write_binfile(v_lf0_smth, os.path.join(outdir_lo, 'lf0', file_id + '.lf0'))
+
+        if cepstra:
+            alpha = {48000: 0.77, 16000: 58}[fs]
+            m_mag_mcep = la.sp_to_mcep(m_mag, n_coeffs=nbins_mel, alpha=alpha, in_type=3)
+            m_real_mcep = la.sp_to_mcep(m_real, n_coeffs=nbins_phase, alpha=alpha, in_type=2)
+            m_imag_mcep = la.sp_to_mcep(m_imag, n_coeffs=nbins_phase, alpha=alpha, in_type=2)
+
+            lu.write_binfile(m_mag_mcep, os.path.join(outdir_lo, 'mag_cc', file_id + '.mag_cc'))
+            lu.write_binfile(m_real_mcep, os.path.join(outdir_lo, 'real_cc', file_id + '.real_cc'))
+            lu.write_binfile(m_imag_mcep, os.path.join(outdir_lo, 'imag_cc', file_id + '.imag_cc'))
+    except KeyboardInterrupt, e:
+        pass
+
+def main_work():
 
     #################################################
       
@@ -125,7 +125,7 @@ if __name__ == '__main__':
     a.add_argument('-l', dest='wavlist_file', default=None)     ##
     a.add_argument('-m', type=int, default=60, help='low dim feature size (compressed mel magnitude spectrum & cepstrum)')  
     a.add_argument('-p', type=int, default=45, help='low dim feature size (compressed mel phase spectra & cepstra)')          
-    a.add_argument('-fftlen', type=int, default=1024)          
+    a.add_argument('-fftlen', type=int, default=2048)          
     a.add_argument('-ncores', type=int, default=0)   
 
     a.add_argument('-pm_dir', type=str, default='', help='Specify a directory of existing pitchmark files to use, instead of starting from scratch')
@@ -158,8 +158,14 @@ if __name__ == '__main__':
 
         pool = multiprocessing.Pool(processes=opts.ncores) 
         results = pool.map(functools.partial(magphase_analysis, outdir=opts.output_dir, fft_len=opts.fftlen, nbins_mel=opts.m, nbins_phase=opts.p, pm_dir=opts.pm_dir, cepstra=opts.cepstra), wavlist)         
-        pool.close() #we are not adding any more processes
-        #pool.join() #tell it to wait until all threads are done before going on
+
+        try:
+            print 'done!'
+        except KeyboardInterrupt:
+            print 'parent received control-c'
+            return        
+
+        pool.close() 
 
 
     else:
@@ -168,3 +174,8 @@ if __name__ == '__main__':
             magphase_analysis(wav_file, outdir=opts.output_dir, fft_len=opts.fftlen, nbins_mel=opts.m, nbins_phase=opts.p, pm_dir=opts.pm_dir, cepstra=opts.cepstra) 
 
 
+
+
+if __name__ == '__main__':
+
+    main_work()
