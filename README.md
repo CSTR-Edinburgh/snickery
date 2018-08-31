@@ -10,9 +10,9 @@ This repository contains code used to build the proposed systems presented in th
   year      = {2018},
 }
 
-@inproceedings{watts2018speech,
+@inproceedings{cvb2018speech,
   title={Exemplar-based speech waveform generation for text-to-speech},
-  author={Oliver Watts and Cassia Valentini-Botinhao and Felipe Espic and Simon King},
+  author={Cassia Valentini-Botinhao and Oliver Watts and Felipe Espic and Simon King},
   booktitle={IEEE Workshop on Spoken Language Technology (submitted)},
   year={2018}
 }
@@ -167,7 +167,7 @@ Snickery can be used in conjunction with Merlin to create a hybrid TTS system. W
 - a version of Merlin (https://github.com/CSTR-Edinburgh/merlin.git) installed in your system
 - a python environment with requirments from both Merlin and Snickery
 
-OBS: Snickery needs sklearn, sklearn and OpenFST (binaries and python bindings; this is only required for the Snickery halfphone variant, see README_FULL on how to install this).
+OBS: Additionally from what Merlin requires, Snickery needs sklearn, sklearn and OpenFST (binaries and python bindings; this is only required for the Snickery halfphone variant, see README_FULL on how to install this).
 
 ## Running the tools
 
