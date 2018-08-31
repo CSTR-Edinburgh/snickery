@@ -424,6 +424,7 @@ def main_work(config, overwrite_existing_data=False):
             #     print 'Skip utterance'            
             #     continue
 
+        sample_rate = config.get('sample_rate', 48000)
         if config['target_representation'] == 'sample':
             
             unit_features = t_speech
@@ -435,7 +436,8 @@ def main_work(config, overwrite_existing_data=False):
             ## Find 'cutpoints': pitchmarks which are considered to be the boudnaries of units, and where those
             ## units will be concatenated:
             #cutpoints, cutpoint_indices = get_cutpoints(timings, pms_seconds)
-            pms_samples = np.array(pms_seconds * 48000, dtype=int)
+
+            pms_samples = np.array(pms_seconds * sample_rate, dtype=int)
 
             cutpoints = segment_axis(pms_samples, 3, overlap=2, axis=0)
 
@@ -447,7 +449,7 @@ def main_work(config, overwrite_existing_data=False):
             if ADD_PHONETIC_EPOCH:
                 labfile = os.path.join(config['label_datadir'], base + '.' + config['lab_extension'])
                 labs = read_label(labfile, config['quinphone_regex'])
-                unit_names = resample_labels.pitch_synchronous_resample_label(48000, 0.005, pms_samples, labs)
+                unit_names = resample_labels.pitch_synchronous_resample_label(sample_rate, 0.005, pms_samples, labs)
                 unit_names = unit_names[1:-1]
             else:                
                 unit_names = np.array(['_']*(t_speech.shape[0]-2))
@@ -462,7 +464,7 @@ def main_work(config, overwrite_existing_data=False):
 
             ## Find 'cutpoints': pitchmarks which are considered to be the boudnaries of units, and where those
             ## units will be concatenated:
-            cutpoints, cutpoint_indices = get_cutpoints(timings, pms_seconds)
+            cutpoints, cutpoint_indices = get_cutpoints(timings, pms_seconds, sample_rate)
 
             #context_data = get_contexts_for_natural_joincost(j_speech, timings, width=2)
             context_data = get_contexts_for_pitch_synchronous_joincost(j_speech, cutpoint_indices)            
@@ -928,7 +930,7 @@ def read_label(labfile, quinphone_regex):
     return outlabel
 
 
-def get_cutpoints(timings, pms):
+def get_cutpoints(timings, pms, sample_rate):
     '''
     Find GCIs which are nearest to the start and end of each unit.
     Also return indices of GCIs so we can map easily to pitch-synchronous features.
@@ -946,7 +948,7 @@ def get_cutpoints(timings, pms):
 
     indices = np.array(indices, dtype=int)
     cutpoints = np.array(cutpoints)
-    cutpoints *= 48000             # TODO: unhardcode frameshift and rate
+    cutpoints *= sample_rate
     cutpoints = np.array(cutpoints, dtype=int)
     return (cutpoints, indices)
 

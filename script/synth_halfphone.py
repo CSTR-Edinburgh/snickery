@@ -2794,7 +2794,7 @@ def get_facts(vals):
                 prosody_target_confidences = [1.0] * len(prosody_targets)
             assert len(prosody_targets) == len(prosody_target_confidences) == len(path)
 
-        fs     = 48000 # in Hz
+        fs     = self.config.get('sample_rate', 48000)
         nfft   = 4096
 
         pm_reaper_dir = self.config['pm_datadir']
@@ -2842,8 +2842,9 @@ def get_facts(vals):
         # pylab.show()
         # sys.exit('aevsdb0000s')
 
-        syn_wave = magphase.synthesis_from_lossless(mag, real, imag, fz, 48000)
-        la.write_audio_file(fname, syn_wave, 48000)
+        sample_rate = self.config.get('sample_rate', 48000)
+        syn_wave = magphase.synthesis_from_lossless(mag, real, imag, fz, sample_rate)
+        la.write_audio_file(fname, syn_wave, sample_rate)
 
 
     def concatenateMagPhaseEpoch_sep_files(self, path, fname, fzero=np.zeros(0), overlap=0):
