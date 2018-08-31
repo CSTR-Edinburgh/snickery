@@ -411,7 +411,7 @@ class Synthesiser(object):
             assert self.config['greedy_search']
             assert self.config.get('target_representation') == 'epoch'
             best_path = self.greedy_joint_search(unit_features)
- 
+
 
         if self.mode_of_operation == 'stream_weight_balancing':
             self.report( '\n\n balancing stream weights -- skip making waveform \n\n')
@@ -690,7 +690,7 @@ class Synthesiser(object):
         write_start = 0
         OFFSET = 0
         for ix in path:
-            
+
             write_end = write_start + multiepoch + overlap
             (mag_frag, real_frag, imag_frag, fz_frag, vuv_frag) = self.retrieve_magphase_frag(ix, extra_frames=overlap/2)
             mag[write_start:write_end, :] += mag_frag
@@ -861,12 +861,25 @@ class Synthesiser(object):
         Store information about what was selected, where the joins are, what the costs
         were, etc. etc. to file
         '''
+
+
+
         data = []
         multiepoch = self.config.get('multiepoch', 1)
         for index in best_path:
             start_index = self.unit_index_within_sentence[index]
             end_index = start_index + multiepoch
             data.append( '%s %s %s'%(self.train_filenames[index], start_index, end_index) )
+
+            # # Get duration of segment in seconds - CVB 18.07.18
+            # pm_file = os.path.join(self.config['pm_datadir'], self.train_filenames[index] + '.pm')
+            # pms_seconds = self.read_pm(pm_file)
+            # print pm_file
+            # # print pms_seconds
+            # # print start_index
+            # # print end_index
+            # duration    = pms_seconds[min(end_index,len(pms_seconds)-1)] - pms_seconds[start_index]
+            # data.append( '%s %s %s %s'%(self.train_filenames[index], start_index, end_index, duration) )
         return data
         ## !TODO: non-epoch version has more here which can be tailored
 
@@ -1051,7 +1064,39 @@ class Synthesiser(object):
             self.node_maps.append(np.arange(self.number_of_units-overlap)[self.cluster_ixx==cluster_number])
             self.stop_clock(t)
         
+    def read_pm(self, fname):
 
+        f = open(fname, 'r')
+        lines = f.readlines()
+        f.close()
+
+        for (i,line) in enumerate(lines):
+            if line.startswith('EST_Header_End'):
+                start = i+1
+                break
+        lines = lines[start:]
+        lines = [float(re.split('\s+',line)[0]) for line in lines]
+
+        lines = np.array(lines)
+
+        ## debug: make sure monotonic increase
+        start_end = segment_axis(lines, 2, overlap=1)
+        diffs = start_end[:,1] - start_end[:,0]
+        neg_diffs = (diffs < 0.0)
+
+        if sum(neg_diffs) > 0:
+            print ('WARNING: pitch marks not monotonically increasing in %s'%(fname))
+            # return np.ones((1,1))
+            lines = lines[:-1]
+
+            start_end = segment_axis(lines, 2, overlap=1)
+            diffs = start_end[:,1] - start_end[:,0]
+            neg_diffs = (diffs < 0.0)
+
+            if sum(neg_diffs) > 0:
+                print ('WARNING: pitch marks not monotonically increasing in %s'%(fname))
+
+        return lines
 
 
 if __name__ == '__main__':
