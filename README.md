@@ -1,5 +1,23 @@
 # Snickery (minimal version)
 
+This repository contains code used to build the proposed systems presented in the following papers:
+
+```
+@inproceedings{watts18examplar,
+  title     = {Exemplar-based speech waveform generation},
+  author    = {Oliver Watts and Cassia Valentini-Botinhao and Felipe Espic and Simon King},
+  booktitle = {Interspeech},
+  year      = {2018},
+}
+
+@inproceedings{watts2018speech,
+  title={Exemplar-based speech waveform generation for text-to-speech},
+  author={Oliver Watts and Cassia Valentini-Botinhao and Felipe Espic and Simon King},
+  booktitle={IEEE Workshop on Spoken Language Technology (submitted)},
+  year={2018}
+}
+```
+
 This README is about use of scripts:
 
 ```
@@ -139,3 +157,23 @@ These can be changed without retraining:
 - `search_epsilon`: how much to approximate the search. 0 means no approximation, so find the largest setting where there is no perceptible difference from this.
 
 Finally, this demo is training on all-natural speech and testing with natural targets. Clearly, natural targets will not be available to a real TTS system. Tweak the config to work with synthetic speech.
+
+# Hybrid text-to-speech synthesis with Merlin
+
+Snickery can be used in conjunction with Merlin to create a hybrid TTS system. We prepared a recipe that uses the slt arctic dataset (wavefiles, state and phone level labels), trains a Merlin model and two Snickery models (small unit and halfphone). The recipe synthesises waveforms from text using Merlin and three different waveform generation modules: MagPhase vocoder, Snickery small unit and Snickery halfphone.
+
+## Requirements
+
+- a version of Merlin (https://github.com/CSTR-Edinburgh/merlin.git) installed in your system
+- a python environment with requirments from both Merlin and Snickery
+
+OBS: Snickery needs sklearn, sklearn and OpenFST (binaries and python bindings; this is only required for the Snickery halfphone variant, see README_FULL on how to install this).
+
+## Running the tools
+
+From the toplevel ```./snickery/``` directory of the repository you cloned:
+```
+SNICKERY=`pwd`
+./script/merlin/hybrid_recipe.sh $SNICKERY $MERLIN $WORK/hybrid/
+```
+where $MERLIN points to the path where Merlin was cloned and $WORK/hybrid is the working directory where data, models and synthesized speech will be stored.
