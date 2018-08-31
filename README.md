@@ -1,6 +1,8 @@
 # Snickery
 
-This repository contains code used to build the proposed systems presented in the following papers:
+This repository contains code used to build the proposed systems presented in the papers *Exemplar-based speech waveform generation* and *Exemplar-based speech waveform generation for text-to-speech*.
+
+## Exemplar-based speech waveform generation
 
 
 
@@ -13,13 +15,6 @@ This repository contains code used to build the proposed systems presented in th
   author    = {Oliver Watts and Cassia Valentini-Botinhao and Felipe Espic and Simon King},
   booktitle = {Interspeech},
   year      = {2018},
-}
-
-@inproceedings{cvb2018speech,
-  title={Exemplar-based speech waveform generation for text-to-speech},
-  author={Cassia Valentini-Botinhao and Oliver Watts and Felipe Espic and Simon King},
-  booktitle={IEEE Workshop on Spoken Language Technology (submitted)},
-  year={2018}
 }
 ```
 
@@ -34,9 +29,9 @@ script/synth_simple.py
 
 Output of the systems evaluated in that paper can be heard [here](<http://homepages.inf.ed.ac.uk/owatts/papers/IS2018_snickery/>).
 
-See section *Hybrid text-to-speech synthesis with Merlin* below for details on using other parts of the code - which is less well tested and documented - to build other types of systems. 
+See section *Exemplar based speech waveform generation for text to speech* below for details on using other parts of the code - which is less well tested and documented - to build other types of systems. 
 
-## Setting up
+### Setting up
 
 Clone repository:
 
@@ -71,7 +66,7 @@ ln -s /afs/inf.ed.ac.uk/user/o/owatts/tool/REAPER-master/build/reaper ./reaper
 
 
 
-### Installation of Python dependencies with virtual environment
+#### Installation of Python dependencies with virtual environment
 
 Make a directory to house virtual environments if you don't already have one, and move to it:
 
@@ -97,7 +92,7 @@ pip install soundfile
 
 
 
-## Running the tools
+### Running the tools
 
 <!-- cd /group/project/cstr2/owatts/temp/slt_work -->
 
@@ -158,18 +153,28 @@ These can be changed without retraining:
 
 Finally, this demo is training on all-natural speech and testing with natural targets. Clearly, natural targets will not be available to a real TTS system. Tweak the config to work with synthetic speech.
 
-# Hybrid text-to-speech synthesis with Merlin
+
+## Exemplar-based speech waveform generation for text-to-speech: hybrid text-to-speech synthesis with Merlin
+
+```
+@inproceedings{cvb2018speech,
+  title={Exemplar-based speech waveform generation for text-to-speech},
+  author={Cassia Valentini-Botinhao and Oliver Watts and Felipe Espic and Simon King},
+  booktitle={IEEE Workshop on Spoken Language Technology (submitted)},
+  year={2018}
+}
+```
 
 Snickery can be used in conjunction with Merlin to create a hybrid TTS system. We prepared a recipe that uses the slt arctic dataset (wavefiles, state and phone level labels), trains a Merlin model and two Snickery models (small unit and halfphone). The recipe synthesises waveforms from text using Merlin and three different waveform generation modules: MagPhase vocoder, Snickery small unit and Snickery halfphone.
 
-## Requirements
+### Requirements
 
-- a version of Merlin (https://github.com/CSTR-Edinburgh/merlin.git) installed in your system
+- a version of [Merlin](<https://github.com/CSTR-Edinburgh/merlin.git>) installed in your system
 - a python environment with requirments from both Merlin and Snickery
 
-OBS: Additionally from what Merlin requires, Snickery needs sklearn, sklearn and OpenFST (binaries and python bindings; this is only required for the Snickery halfphone variant, see README_FULL on how to install this).
+Additionally from what Merlin requires, Snickery needs sklearn, sklearn and OpenFST (binaries and python bindings; this is only required for the Snickery halfphone variant, see README_FULL on how to install this).
 
-## Running the tools
+### Running the tools
 
 From the toplevel ```./snickery/``` directory of the repository you cloned:
 ```
