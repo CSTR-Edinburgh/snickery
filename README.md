@@ -1,6 +1,11 @@
-# Snickery (minimal version)
+# Snickery
 
 This repository contains code used to build the proposed systems presented in the following papers:
+
+
+
+[<img src="https://github.com/oliverwatts/snickery/blob/master/media/IS2018_thumbnail_top2.png">](<https://www.isca-speech.org/archive/Interspeech_2018/pdfs/1857.pdf>)
+
 
 ```
 @inproceedings{watts18examplar,
@@ -18,23 +23,18 @@ This repository contains code used to build the proposed systems presented in th
 }
 ```
 
-This README is about use of scripts:
+The first part of this README is about use of scripts:
 
 ```
-script/synth_simple.py 
 script/train_simple.py
+script/synth_simple.py 
 ```
 
-These are simplified version of the scripts:
+... which can only build a few restricted types of system (selection of epoch-based fragments, greedy search only). They can be used to replicate the system proposed in the paper *Exemplar-based speech waveform generation*. 
 
-```
-script/synth_halfphone.py 
-script/train_halfphone.py
-```
+Output of the systems evaluated in that paper can be heard [here](<http://homepages.inf.ed.ac.uk/owatts/papers/IS2018_snickery/>).
 
-and can only build a few restricted types of system (selection of epoch-based fragments, greedy search only). They can be used to replicate the IS2018 experiments. 
-
-See README_FULL for other uses of the toolkit.
+See section *Hybrid text-to-speech synthesis with Merlin* below for details on using other parts of the code - which is less well tested and documented - to build other types of systems. 
 
 ## Setting up
 
