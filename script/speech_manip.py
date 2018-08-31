@@ -228,9 +228,12 @@ def lin_interp_f0(fz):
     voicing_flag[voiced_ix] = 1.0
     
     ## linear interp voiced:
-    interpolator = scipy.interpolate.interp1d(voiced_ix, y[voiced_ix], kind='linear', axis=0, \
+    if voiced_ix.shape[0] == 0:
+        v_interpolated = fz
+    else:    
+        interpolator = scipy.interpolate.interp1d(voiced_ix, y[voiced_ix], kind='linear', axis=0, \
                                 bounds_error=False, fill_value='extrapolate')
-    v_interpolated = interpolator(np.arange(y.shape[0]))
+        v_interpolated = interpolator(np.arange(y.shape[0]))
 
     if 0:
         import pylab
