@@ -1,3 +1,5 @@
+<img src="https://github.com/CSTR-Edinburgh/snickery/blob/master/media/snickery_logo_2.png" data-canonical-src="https://github.com/CSTR-Edinburgh/snickery/blob/master/media/snickery_logo_2.png" width="100" height="100" />
+
 # Snickery
 
 This repository contains code used to build the proposed systems presented in the papers *Exemplar-based speech waveform generation* and *Exemplar-based speech waveform generation for text-to-speech*.
