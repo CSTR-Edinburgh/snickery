@@ -27,7 +27,7 @@ script/synth_simple.py
 
 ... which can only build a few restricted types of system (selection of epoch-based fragments, greedy search only). They can be used to replicate the system proposed in the paper *Exemplar-based speech waveform generation*. 
 
-Output of the systems evaluated in that paper can be heard [here](<http://homepages.inf.ed.ac.uk/owatts/papers/IS2018_snickery/>).
+Output samples of the systems evaluated in that paper can be heard [here](<http://homepages.inf.ed.ac.uk/owatts/papers/IS2018_snickery/>).
 
 See section *Exemplar based speech waveform generation for text to speech* below for details on using other parts of the code - which is less well tested and documented - to build other types of systems. 
 
@@ -160,10 +160,12 @@ Finally, this demo is training on all-natural speech and testing with natural ta
 @inproceedings{cvb2018speech,
   title={Exemplar-based speech waveform generation for text-to-speech},
   author={Cassia Valentini-Botinhao and Oliver Watts and Felipe Espic and Simon King},
-  booktitle={IEEE Workshop on Spoken Language Technology (submitted)},
+  booktitle={IEEE Workshop on Spoken Language Technology},
   year={2018}
 }
 ```
+
+Output samples of the systems evaluated in that paper can be heard [here](<http://groups.inf.ed.ac.uk/script_tts/papers/SLT2018/>).
 
 Snickery can be used in conjunction with Merlin to create a hybrid TTS system. We prepared a recipe that uses the slt arctic dataset (wavefiles, state and phone level labels), trains a Merlin model and two Snickery models (small unit and halfphone). The recipe synthesises waveforms from text using Merlin and three different waveform generation modules: MagPhase vocoder, Snickery small unit and Snickery halfphone.
 
