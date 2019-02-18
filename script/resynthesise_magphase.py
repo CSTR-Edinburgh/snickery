@@ -99,6 +99,6 @@ if __name__ == '__main__':
     else:
 
         for base in baselist:
-            synthesis(base, feature_dir=opts.feature_dir, output_dir=opts.output_dir, fft_len=opts.fftlen, nbins_mel=opts.m, nbins_phase=opts.p)
+            synthesis(base, feature_dir=opts.feature_dir, output_dir=opts.output_dir, fft_len=opts.fftlen, nbins_mel=opts.m, nbins_phase=opts.p, fs=opts.fs)
 
 
